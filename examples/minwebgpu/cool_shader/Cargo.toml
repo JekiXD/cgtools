@@ -1,0 +1,36 @@
+[package]
+name = "minwebgpu_cool_shader"
+version = "0.1.0"
+edition = "2021"
+authors = [ 
+  "Kostiantyn Mysnyk <wandalen@obox.systems>",
+  "Avramenko Yevhenii <yevhenii.av@obox.systems>" 
+]
+license = "MIT"
+
+
+[dependencies]
+bytemuck = { workspace = true }
+mingl = { workspace = true, features = [ "camera_orbit_controls" ] }
+
+[dependencies.minwebgpu]
+workspace = true
+features = [
+  'future',
+  'file',
+  'objModel',
+  'math'
+]
+
+[dependencies.web-sys]
+workspace = true
+features = [
+  'MouseEvent',
+  'PointerEvent',
+  'WheelEvent',
+  'WebGlTexture',
+  'HtmlImageElement'
+]
+
+
+
