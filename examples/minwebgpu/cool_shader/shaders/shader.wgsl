@@ -51,6 +51,7 @@ const CRITICAL_ANGLE_ATOB : f32 = sqrt( max( 0.0, 1.0 - iorBtoA * iorBtoA ) );
 const CRITICAL_ANGLE_BTOA : f32 = sqrt( max( 0.0, 1.0 - iorAtoB * iorAtoB ) );
 const LIGHT_POWER : f32 = 8.0;
 const BOX_EDGE_COLOR : vec3f = vec3f( 0.0 );
+const MOON_LIGHT_DIR : vec3f = normalize( vec3f( -1.0, 1.0, -1.0 ) );
 
 @fragment
 fn fs_main( in : VSOut ) -> @location( 0 ) vec4f
@@ -102,6 +103,7 @@ fn fs_main( in : VSOut ) -> @location( 0 ) vec4f
     final_color = mix( final_color, BOX_EDGE_COLOR, edge_t ) ;
   }
 
+  //return vec4f( aces_tonemap( final_color ), 1.0 );
   return vec4f( final_color, 1.0 );
 }
 
@@ -117,20 +119,6 @@ fn smooth_box_edge( ro : vec3f ) -> f32
 
   return max( edge_blur.x, max( edge_blur.y, edge_blur.z ) );
 }
-
-// Schlick ver.
-fn freshel( view_dir : vec3f, halfway : vec3f, f0 : vec3f, critical_angle_cosine : f32 ) -> vec3f
-{
-  let VdotH = dot( view_dir, halfway );
-  // Case of full reflection
-  if( VdotH < critical_angle_cosine ) 
-  {
-    return vec3( 1.0 );
-  }
-
-  return f0 + ( 1.0 - f0 ) * pow( ( 1.0 - VdotH ), 5.0 );
-}
-
 
 //https://en.wikipedia.org/wiki/Line%E2%80%93plane_intersection
 fn raytrace_plane
@@ -157,7 +145,7 @@ fn draw_background
 ) -> vec3f
 {
   var final_color = vec3f( 0.0 );
-  let plane_size = 10.0;
+  let plane_size = 5.0;//10.0;
   let blur_radius = 8.0;
   let plane_normal = vec3f( 0.0, 1.0, 0.0 ); // Normal of the plane
   let p0 = vec3f( 0.0, -1.01, 0.0 ); // Any point on the plane
@@ -208,13 +196,16 @@ fn draw_background
     }
     else
     {
-      let reflectedRD = normalize( reflect( rd_in, vec3f( 0.0, 1.0, 0.0 ) ) );
-      let F0 = vec3f( 0.02 );
-      let critical_angle = 0.0;
-      let F = freshel( -reflectedRD, plane_normal, F0, critical_angle );
+      let sea_color = draw_sea( plane_hit, rd_in );
 
-      let stars = draw_stars( reflectedRD );
-      final_color = F * stars;
+      // let reflectedRD = normalize( reflect( rd_in, vec3f( 0.0, 1.0, 0.0 ) ) );
+      // let F0 = vec3f( 0.02 );
+      // let critical_angle = 0.0;
+      // let F = freshel( -reflectedRD, plane_normal, F0, critical_angle );
+
+      // let stars = draw_stars( reflectedRD );
+      // final_color = F * stars;
+      final_color = sea_color;
     }
   }
 
@@ -338,6 +329,103 @@ fn draw_stars
   }
 
   return final_color;
+}
+
+fn draw_sea
+(
+  p_in : vec3f,
+  rd_in : vec3f
+) -> vec3f
+{
+  let step_size = 1.0;
+
+  var current_p = p_in;
+  var prev_p = vec3f( 0.0 );
+  var current_sea_height =  1.0 - sea_noise( p_in );
+  var prev_sea_height = -1.0;
+  var count = 0;
+  while abs( current_p.y + 1.01 ) < current_sea_height
+  {
+    if count > 16 { break; }
+    prev_sea_height = current_sea_height;
+    prev_p = current_p;
+    current_p = current_p + rd_in * step_size;
+    current_sea_height = 1.0 - sea_noise( current_p );
+    count += 1;
+  } 
+
+  let after_d = current_sea_height - abs( current_p.y+ 1.01 );
+  let before_d = prev_sea_height - abs( prev_p.y+ 1.01 );
+  var p = mix( current_p, prev_p, after_d / ( after_d - before_d ) );
+
+  let normal = sea_normal( p ); 
+  let F = freshel( -rd_in, normal, vec3f( 0.04 ), 0.0 );
+
+  let LdotN = saturate( dot( normal, MOON_LIGHT_DIR ) );
+  let H = normalize( MOON_LIGHT_DIR - rd_in );
+  let phong_value = pow( dot( H, normal ), 32.0 );
+
+  let reflectedRD = normalize( reflect( rd_in, normal ) );
+  let stars_color = F * draw_stars( reflectedRD );
+
+  let diffuse_color = ( 1.0 - F ) * LdotN * vec3f( 0.8,0.9,0.6 ) * 0.6 + phong_value;
+  var color = stars_color + diffuse_color;
+
+  //color = normal;
+
+  return color;
+}
+
+fn sea_octave( uv_in : vec2f, choppy : f32 ) -> f32
+{
+  // Offset the uv value in y = x direction by the noise value
+  let uv = uv_in + perlin_noise2dx1d( uv_in );
+  var s_wave = 1.0 - abs( sin( uv ) );
+  let c_wave = abs( cos( uv ) );
+  // Smooth out the waves
+  s_wave = mix( s_wave, c_wave, s_wave );
+  // Shuffle the resulting values, I guess
+  // Minus from 1.0 - for the wave to cave in
+  return pow( 1.0 - pow( s_wave.x * s_wave.y, 0.65 ), choppy );
+}
+
+// Fbm based sea noise
+fn sea_noise( p : vec3f ) -> f32
+{
+  var freq = 0.16;
+  var amp = 0.6; // Height
+  var choppy = 4.0;
+  let octave_m = mat2x2( 1.6, 1.2, -1.2, 1.6 );
+  var uv = p.xz; 
+  uv.x *= 0.75;
+  
+  var d = 0.0;
+  var h = 0.0;    
+
+  for( var i = 0; i < 5; i++ ) 
+  { 
+    // Mix two octaves for better detail
+    d = sea_octave( ( uv + u.time ) * freq, choppy ) + sea_octave( ( uv - u.time ) * freq, choppy );
+    // Add the height of the current octave to the sum
+    h += d * amp;        
+    // deform uv domain( rotate and stretch)
+    uv *= octave_m; 
+    freq *= 1.9; 
+    amp *= 0.22;
+    choppy = mix( choppy, 1.0, 0.2 );
+  }
+
+  return h;
+}
+
+fn sea_normal( p : vec3f ) -> vec3f
+{
+  let e = 0.01;
+  let offset = vec2f( 1.0, 0.0 ) * e;
+  let dfdx = ( sea_noise( p + offset.xyy ) - sea_noise( p - offset.xyy ) );
+  let dfdz = ( sea_noise( p + offset.yyx ) - sea_noise( p - offset.yyx ) );
+  let normal = normalize( vec3f( -dfdx, 2.0 * e, -dfdz ) );
+  return normal;
 }
 
 fn draw_patch
@@ -546,6 +634,24 @@ fn nBilinearPatch( ps : vec4f,  ph : vec4f, pos : vec3f ) -> vec3f
 }
 //<< Bilinear Patch
 
+//
+// Different utilities
+//
+
+// Schlick ver.
+fn freshel( view_dir : vec3f, halfway : vec3f, f0 : vec3f, critical_angle_cosine : f32 ) -> vec3f
+{
+  let VdotH = dot( view_dir, halfway );
+  // Case of full reflection
+  if( VdotH < critical_angle_cosine ) 
+  {
+    return vec3( 1.0 );
+  }
+
+  return f0 + ( 1.0 - f0 ) * pow( ( 1.0 - VdotH ), 5.0 );
+}
+
+
 // The following function is taken from https://www.shadertoy.com/view/WlffDn
 // Function fcos() is a band-limited cos(x).
 //
@@ -649,8 +755,70 @@ fn hash3dx3d( uv : vec3f ) -> vec3f
   return fract( sin( v ) * 43758.5453123 );
 }
 
+fn perlin_noise2dx1d( p : vec2f ) -> f32
+{
+  let i = floor( p );
+  let f = fract( p );	
+	let u = smoothstep( vec2f( 0.0 ), vec2f( 1.0 ), f );
+
+  let noise = mix( mix( hash2dx1d( i + vec2( 0.0,0.0 ) ), 
+                        hash2dx1d( i + vec2( 1.0,0.0 ) ), u.x ),
+                   mix( hash2dx1d( i + vec2( 0.0,1.0 ) ), 
+                        hash2dx1d( i + vec2( 1.0,1.0 ) ), u.x ), u.y );
+
+  return noise * 2.0 - 1.0;
+}
+
 fn remap( t_min_in : f32, t_max_in : f32, t_min_out : f32, t_max_out : f32, v : f32 ) -> f32
 {
   let k = ( v - t_min_in ) / ( t_max_in - t_min_in );
   return mix( t_min_out, t_max_out, k );
+}
+
+fn aces_tonemap( color : vec3f ) -> vec3f
+{  
+  let m1 = mat3x3
+  (
+    0.59719, 0.07600, 0.02840,
+    0.35458, 0.90834, 0.13383,
+    0.04823, 0.01566, 0.83777
+  );
+  let m2 = mat3x3
+  (
+    1.60475, -0.10208, -0.00327,
+    -0.53108,  1.10813, -0.07276,
+    -0.07367, -0.00605,  1.07602
+  );
+  let v = m1 * color;  
+  let a = v * ( v + 0.0245786 ) - 0.000090537;
+  let b = v * ( 0.983729 * v + 0.4329510 ) + 0.238081;
+  return pow( clamp( m2 * ( a / b ), vec3f( 0.0 ), vec3f( 1.0 ) ), vec3f( 1.0 / 2.2 ) );  
+}
+
+// Some very barebones but fast atmosphere approximation
+fn extra_cheap_atmosphere( raydir : vec3f, sundir : vec3f ) -> vec3f
+{
+  //sundir.y = max(sundir.y, -0.07);
+  let special_trick = 1.0 / (raydir.y * 1.0 + 0.1);
+  let special_trick2 = 1.0 / (sundir.y * 11.0 + 1.0);
+  let raysundt = pow(abs(dot(sundir, raydir)), 2.0);
+  let sundt = pow(max(0.0, dot(sundir, raydir)), 8.0);
+  let mymie = sundt * special_trick * 0.2;
+  let suncolor = mix(vec3(1.0), max(vec3f(0.0), vec3(1.0) - vec3f(5.5, 13.0, 22.4) / 22.4), special_trick2);
+  let bluesky= vec3f(5.5, 13.0, 22.4) / 22.4 * suncolor;
+  var bluesky2 = max(vec3(0.0), bluesky - vec3f(5.5, 13.0, 22.4) * 0.002 * (special_trick + -6.0 * sundir.y * sundir.y));
+  bluesky2 *= special_trick * (0.24 + raysundt * 0.24);
+  return bluesky2 * (1.0 + 1.0 * pow(1.0 - raydir.y, 3.0));
+} 
+
+// Get atmosphere color for given direction
+fn getAtmosphereColor( dir : vec3f ) -> vec3f
+{
+  return extra_cheap_atmosphere( dir, MOON_LIGHT_DIR ) * 0.5;
+}
+
+// Get sun color for given direction
+fn getSunColor( dir : vec3f ) -> vec3f 
+{ 
+  return vec3f( pow( max( 0.0, dot( dir, MOON_LIGHT_DIR ) ), 720.0 ) * 210.0 );
 }
