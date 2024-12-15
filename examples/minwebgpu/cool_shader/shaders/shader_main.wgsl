@@ -76,6 +76,10 @@ fn fs_main( in : VSOut ) -> @location( 0 ) vec4f
   let vx = normalize( cross( vz, vy ) );
   vy = normalize( cross( vx, vz ) );
 
+  // Ray direction u.resolution.y / u.resolution.x
+  var uv = ( in.pos.xy * 2.0 - u.resolution ) / u.resolution;
+  uv = uv * 0.5 + 0.5;
+
   var rd = vec3f( ( in.pos.xy * 2.0 - u.resolution ) / u.resolution.x, 0.7 );
   rd.y *= -1.0;
   rd = normalize( vx * rd.x + vy * rd.y + vz * rd.z );
