@@ -31,7 +31,11 @@ struct Uniforms
 
 @group( 0 ) @binding( 0 ) var< uniform > u : Uniforms;
 
-const BOX_SIZE : vec3f = vec3f( 1.0, 1.0, 1.0 );
+// Shaders used:
+// https://www.shadertoy.com/view/MdKXzc
+
+
+const PI : f32 = 3.14159265;
 // Refractive index of the air
 const airRI : f32 = 1.0;
 // Refractive index of the box( water )
@@ -42,8 +46,8 @@ const iorAtoB : f32 = airRI / boxRI;
 const iorBtoA : f32 = boxRI / airRI;
 const F0 : vec3f = vec3f( pow( abs( ( boxRI - airRI ) ) / ( boxRI + airRI ), 2.0 ) );
 const COLOR_ABSORPTION : vec3f = vec3f( 0.9 );
-//const COLOR_ABSORPTION : vec3f = vec3f( 0.5, 0.5, 0.9 );
-const NUM_REFLECTIONS : i32 = 5;
+// Drawing Nebula is quite expensive, so be careful with the amount of reflections
+const NUM_REFLECTIONS : i32 = 2;
 const BOX_DIMENSIONS : vec3f = vec3f( 0.5, 1.0, 0.5 );
 // Distance to the edges
 const BOX_DTE : vec3f = vec3f( length( BOX_DIMENSIONS.xz ), length( BOX_DIMENSIONS.xy ), length( BOX_DIMENSIONS.yz ) );
@@ -52,13 +56,19 @@ const CRITICAL_ANGLE_BTOA : f32 = sqrt( max( 0.0, 1.0 - iorAtoB * iorAtoB ) );
 const LIGHT_POWER : f32 = 8.0;
 const BOX_EDGE_COLOR : vec3f = vec3f( 0.0 );
 const MOON_LIGHT_DIR : vec3f = normalize( vec3f( -1.0, 1.0, -1.0 ) );
+const PLANE_P : vec3f = vec3f( 0.0, -1.01, 0.0 );
+const M : vec2f = vec2f( 1.0, 0.0 );
+const INSIDES_NOISE : f32 = 0.3;
+const WATER_INTENSITY : f32 = 0.5;
+const INNER_BOX_SCALE : f32 = 6.0;
+const TRANSPARENT_BOX : bool = false;
 
 @fragment
 fn fs_main( in : VSOut ) -> @location( 0 ) vec4f
 {
   // Ray origin
   let ro = u.eye;
-  var light_source = normalize( vec3f( -1.0, 1.0, -1.0 ) ) * vec3f( 3.75, 2.0, 3.75 );
+  var light_source = normalize( vec3f( -1.0, 1.0, -1.0 ) ) * vec3f( 4.75, 4.0, 4.75 );
 
   // Orthonormal vectors of the view transformation
   let vz = normalize( u.view_dir );
@@ -75,35 +85,55 @@ fn fs_main( in : VSOut ) -> @location( 0 ) vec4f
   rd = normalize( vx * rd.x + vy * rd.y + vz * rd.z );
 
   var final_color = vec3f( 0.0 );
-  final_color = draw_background( ro, rd, light_source );
-  //draw_patch( ro + vec3f( 0.0, 0.0, 0.0 ), rd, &final_color );
 
-  var box_normal : vec3f;
-  let box_t = raytrace_box( ro, rd, &box_normal, true );
-
-  if box_t > 0.0
+  if all( abs( ro ) < BOX_DIMENSIONS )
   {
-    var ro = ro + box_t * rd;
+    final_color = draw_box_background( ro * INNER_BOX_SCALE, rd );
+  }
+  else
+  {
+     final_color = draw_background( ro, rd, light_source );
 
-    let F = freshel( -rd, box_normal, F0, CRITICAL_ANGLE_ATOB );
-    var refractedRD = refract( rd, box_normal, iorAtoB );
-    let reflectedRD = normalize( reflect( rd, box_normal ) );
+    var box_normal : vec3f;
+    let box_t = raytrace_box( ro, rd, &box_normal, BOX_DIMENSIONS, true );
 
-    if length( refractedRD ) > 0.0
+
+    if box_t > 0.0
     {
-      refractedRD = normalize( refractedRD );
-      let insides_color = draw_insides( ro, refractedRD, light_source );
-      final_color += ( 1.0 - F ) * insides_color;
+      final_color = vec3f( 0.0 );
+      var ro = ro + box_t * rd;
+
+      let w = box_normal;
+      let u = normalize( M.xyy * w.z - M.yyx * w.x - M.yyx * w.y );
+      let v = normalize( M.yxy * w.z + M.yxy * w.x - M.xyy * w.y );
+      let TBN = mat3x3( u, w, v );
+
+      var uv = ro.xy * w.z + ro.xz * w.y + ro.yz * w.x;
+      uv *= INSIDES_NOISE;
+
+      let n = normalize( TBN * water_normal( uv ) );
+
+      let F = freshel( -rd, n, F0, CRITICAL_ANGLE_ATOB );
+      var refractedRD = refract( rd, n, iorAtoB );
+      let reflectedRD = normalize( reflect( rd, n ) );
+
+      if length( refractedRD ) > 0.0
+      {
+        refractedRD = normalize( refractedRD );
+        let insides_color = draw_insides( ro, refractedRD, light_source );
+        final_color += ( 1.0 - F ) * insides_color;
+      }
+
+      let refl_color = draw_background( ro, reflectedRD, light_source );
+      final_color += F * refl_color;
+
+      let edge_t = smooth_box_edge( ro );
+      final_color = mix( final_color, BOX_EDGE_COLOR, edge_t ) ;
     }
-
-    let refl_color = draw_background( ro, reflectedRD, light_source );
-    final_color += F * refl_color;
-
-    let edge_t = smooth_box_edge( ro );
-    final_color = mix( final_color, BOX_EDGE_COLOR, edge_t ) ;
   }
 
   //return vec4f( aces_tonemap( final_color ), 1.0 );
+  //return vec4f( pow( final_color, vec3f( 1.0 / 2.2 ) ), 1.0 );
   return vec4f( final_color, 1.0 );
 }
 
@@ -120,23 +150,6 @@ fn smooth_box_edge( ro : vec3f ) -> f32
   return max( edge_blur.x, max( edge_blur.y, edge_blur.z ) );
 }
 
-//https://en.wikipedia.org/wiki/Line%E2%80%93plane_intersection
-fn raytrace_plane
-( 
-  ro_in : vec3f, // Ray origin
-  rd_in : vec3f, // Ray direction
-  normal : vec3f, // Normal of the plane
-  p0 : vec3f // Any point on the plane
-) -> f32
-{
-  // If this equals 0.0, then the line is parallel to the plane
-  let RdotN = dot( rd_in, normal );
-  if RdotN == 0.0 { return -1.0; }
-
-  let t = dot( ( p0 - ro_in ), normal ) / RdotN;
-  return t;
-}
-
 fn draw_background
 (
   ro_in : vec3f,
@@ -145,15 +158,10 @@ fn draw_background
 ) -> vec3f
 {
   var final_color = vec3f( 0.0 );
-  let plane_size = 5.0;//10.0;
-  let blur_radius = 8.0;
+  let plane_size = 6.0;
+  let blur_radius = 5.0;
   let plane_normal = vec3f( 0.0, 1.0, 0.0 ); // Normal of the plane
-  let p0 = vec3f( 0.0, -1.01, 0.0 ); // Any point on the plane
-
-  if rd_in.y > 0.01
-  {
-    final_color += draw_stars( rd_in );
-  }
+  let p0 = PLANE_P; // Any point on the plane
 
   let plane_t = raytrace_plane( ro_in, rd_in, plane_normal, p0 );
 
@@ -171,16 +179,12 @@ fn draw_background
       let H = normalize( light_dir - rd_in );
       let phong_value = pow( saturate( dot( plane_normal, H ) ), 16.0 ) * 0.1;
 
-      var diff_color : vec3f;
-      {
-        let len = length( uv );
-        var f : f32; 
-        if i32( len ) % 2 == 0 { f = fract( len ); } else { f = 1.0 - fract( len ); }
-
-        diff_color = mix( vec3f( 0.5 ), vec3f( 1.0 ), smoothstep( 0.0, 1.0, f ) );
-      }
+      var diff_color = vec3f( 1.0 );
       var plane_color = ( LdotN * diff_color + phong_value );
       plane_color *= attenuation; 
+
+      let shad = boxSoftShadow( plane_hit, normalize( light_source - plane_hit ), BOX_DIMENSIONS, 2.0 );
+      plane_color *= smoothstep( -0.2, 1.0, shad );
 
       final_color = mix
       ( 
@@ -194,20 +198,21 @@ fn draw_background
         ) 
       );
     }
-    else
-    {
-      let sea_color = draw_sea( plane_hit, rd_in );
-
-      // let reflectedRD = normalize( reflect( rd_in, vec3f( 0.0, 1.0, 0.0 ) ) );
-      // let F0 = vec3f( 0.02 );
-      // let critical_angle = 0.0;
-      // let F = freshel( -reflectedRD, plane_normal, F0, critical_angle );
-
-      // let stars = draw_stars( reflectedRD );
-      // final_color = F * stars;
-      final_color = sea_color;
-    }
   }
+
+  return pow( final_color, vec3f( 1.0 / 2.2 ) );
+}
+
+fn draw_box_background
+(
+  ro_in : vec3f,
+  rd_in : vec3f
+) -> vec3f
+{
+  var final_color = vec3f( 0.0 );
+
+  final_color += draw_stars( rd_in );
+  final_color += draw_nebula( ro_in, rd_in );
 
   return final_color;
 }
@@ -226,27 +231,44 @@ fn draw_insides
   var attenuation = vec3f( 1.0 );
   for( var i = 0; i < NUM_REFLECTIONS; i++ )
   {
+    let inside_color = draw_box_background( prev_ro * INNER_BOX_SCALE, prev_rd );
+    final_color += inside_color * attenuation;
+
     var box_normal : vec3f;
-    let box_t = raytrace_box( prev_ro, prev_rd, &box_normal, false );
+    let box_t = raytrace_box( prev_ro, prev_rd, &box_normal, BOX_DIMENSIONS, false );
 
     var new_ro = prev_ro + box_t * prev_rd;
     distance_traveled += length( prev_ro - new_ro );
 
-    let F = freshel( prev_rd, box_normal, F0, CRITICAL_ANGLE_BTOA );
-    let reflectedRD = normalize( reflect( prev_rd, -box_normal ) );
-    let refractedRD = refract( prev_rd, -box_normal , iorBtoA );
+    let w = box_normal;
+    let u = M.xyy * w.z - M.yyx * w.x - M.yyx * w.y;
+    let v = M.yxy * w.z + M.yxy * w.x - M.xyy * w.y;
+    let TBN = mat3x3( u, w, v );
 
-    if length( refractedRD ) > 0.0
+    var uv = new_ro.xy * w.z + new_ro.xz * w.y + new_ro.yz * w.x;
+    uv *= INSIDES_NOISE;
+
+    let n = TBN * water_normal( uv );
+
+    let F = freshel( prev_rd, n, F0, CRITICAL_ANGLE_BTOA );
+    let reflectedRD = normalize( reflect( prev_rd, -n ) );
+    let refractedRD = refract( prev_rd, -n , iorBtoA );
+
+    // Makes the box transparent
+    if TRANSPARENT_BOX
     {
-      let refractedRD = normalize( refractedRD );
-      let F = freshel( refractedRD, box_normal, F0, CRITICAL_ANGLE_ATOB );
-      let background_color = draw_background( new_ro, refractedRD, light_source );
-      final_color += ( 1.0 - F ) * background_color * exp( -distance_traveled * 1.0 * vec3f( 1.0 - COLOR_ABSORPTION ) ) * attenuation;
-    }
+      if length( refractedRD ) > 0.0
+      {
+        let refractedRD = normalize( refractedRD );
+        let F = freshel( refractedRD, n, F0, CRITICAL_ANGLE_ATOB );
+        let background_color = draw_background( new_ro, refractedRD, light_source );
+        final_color += ( 1.0 - F ) * background_color * exp( -distance_traveled * 1.0 * vec3f( 1.0 - COLOR_ABSORPTION ) ) * attenuation;
+      }
 
-    let edge_t = smooth_box_edge( new_ro );
-    let edge_color =  mix( final_color, BOX_EDGE_COLOR, edge_t );
-    final_color = mix( final_color, edge_color, smoothstep(  0.0,  1.0, exp( -distance_traveled / 3.0 ) ) );
+      let edge_t = smooth_box_edge( new_ro );
+      let edge_color =  mix( final_color, BOX_EDGE_COLOR, edge_t );
+      final_color = mix( final_color, edge_color, smoothstep(  0.0,  1.0, exp( -distance_traveled / 3.0 ) ) );
+    }
 
     attenuation *= F;
     prev_ro = new_ro;
@@ -265,8 +287,6 @@ fn generate_stars
   twinkle : bool
 ) -> vec3f
 {
-  //var final_color = vec3f( 0.0 );
-
   let uv = uv_in * grid_size;
   let cell_id = floor( uv );
   let cell_coords = fract( uv ) - 0.5;
@@ -305,12 +325,12 @@ fn draw_stars
   let normalization = vec2f( 0.1591, 0.3183 );
   var uv = vec2f( theta, phi ) * normalization + vec2f( 0.5 );
   var grid_size = 10.0;
-  var star_size = 0.08;
+  var star_size = 0.07;
   let ray_width = 0.005;
   let star_color = vec3f( 1.0 );
 
-  let star_size_change = 0.8;
-  let grid_size_change = 1.5;
+  let star_size_change = 0.9;
+  let grid_size_change = 1.6;
 
   // Big start are animated
   for( var i = 0; i < 3; i++ )
@@ -320,8 +340,10 @@ fn draw_stars
     grid_size *= grid_size_change;
   }
 
+  star_size *= 0.8;
+
   // Small stars are not animated
-  for( var i = 3; i < 5; i++ )
+  for( var i = 3; i < 6; i++ )
   {
     final_color += generate_stars( uv, grid_size, star_size, ray_width, false );
     star_size *= star_size_change;
@@ -331,52 +353,178 @@ fn draw_stars
   return final_color;
 }
 
-fn draw_sea
-(
-  p_in : vec3f,
-  rd_in : vec3f
-) -> vec3f
+// https://www.shadertoy.com/view/MdKXzc
+fn draw_nebula( ro : vec3f, rd : vec3f ) -> vec3f
 {
-  let step_size = 1.0;
+  // Redius of the sphere that envelops the nebula
+  let radius = 4.0;// + INNER_BOX_SCALE * 0.5 * smoothstep( -1.0, 1.0, sin( u.time * 0.7 ) );
+  // Max density
+  let h = 0.1;
+  let optimal_radius = 4.0;
+  let k = optimal_radius / radius;
 
-  var current_p = p_in;
-  var prev_p = vec3f( 0.0 );
-  var current_sea_height =  1.0 - sea_noise( p_in );
-  var prev_sea_height = -1.0;
-  var count = 0;
-  while abs( current_p.y + 1.01 ) < current_sea_height
-  {
-    if count > 16 { break; }
-    prev_sea_height = current_sea_height;
-    prev_p = current_p;
-    current_p = current_p + rd_in * step_size;
-    current_sea_height = 1.0 - sea_noise( current_p );
-    count += 1;
-  } 
+  var p : vec3f;
+  var final_color = vec4f( 0.0 );
+  var local_density = 0.0;
+  var total_density = 0.0;
+  var weight = 0.0;
 
-  let after_d = current_sea_height - abs( current_p.y+ 1.01 );
-  let before_d = prev_sea_height - abs( prev_p.y+ 1.01 );
-  var p = mix( current_p, prev_p, after_d / ( after_d - before_d ) );
+  let vt = raytrace_sphere( ro, rd, vec3f( 0.0 ), radius );
+  // Itersection point when entering the sphere
+  let tin = vt.x;
+  // Intersection point when exiting the sphere
+  let tout = vt.y;
+  var t = max( tin, 0.0 );
 
-  let normal = sea_normal( p ); 
-  let F = freshel( -rd_in, normal, vec3f( 0.04 ), 0.0 );
+  // If sphere was hit
+  if any( vt != vec2f( -1.0 ) )
+  { 
+    for( var i = 0; i < 64; i++ )
+    {
+      if total_density > 0.9 || t > tout { break; }
 
-  let LdotN = saturate( dot( normal, MOON_LIGHT_DIR ) );
-  let H = normalize( MOON_LIGHT_DIR - rd_in );
-  let phong_value = pow( dot( H, normal ), 32.0 );
+      // Current posiiton inside the sphere
+      p = ro + t * rd;
+      p *= k;
+      // By feeding the 3d position we turn 3d domain into a 3d texture of densities
+      // So we get the density at the current position
+      let d = abs( nebula_noise( p * 3.0 ) * 0.5 ) + 0.07;
 
-  let reflectedRD = normalize( reflect( rd_in, normal ) );
-  let stars_color = F * draw_stars( reflectedRD );
+      // Distance to the light soure
+      var ls_dst = max( length( p ), 0.001 ); 
 
-  let diffuse_color = ( 1.0 - F ) * LdotN * vec3f( 0.8,0.9,0.6 ) * 0.6 + phong_value;
-  var color = stars_color + diffuse_color;
+      // The color of light 
+      // https://www.shadertoy.com/view/cdK3Wy
+      let _T = ls_dst * 2.3 + 2.6;
+      var light_color = 0.4 + 0.5 * cos( _T + PI * 0.5 * vec3( -0.5, 0.15, 0.5 ) );
+      final_color += vec4f( vec3f( 0.67, 0.75, 1.0 ) / ( ls_dst * ls_dst * 10.0 ) / 80.0, 0.0 ); // star itself
+      final_color += vec4f( light_color / exp( ls_dst * ls_dst * ls_dst * 0.08 ) / 30.0, 0.0 ); // bloom
 
-  //color = normal;
+      if d < h
+      {
+        // Compute local density 
+        local_density = h - d;
+        // Compute weighting factor. The more density accumulated so far, the less weigth current local density has
+        weight = ( 1.0 - total_density ) * local_density;
+        // Accumulate density
+        total_density += weight + 1.0 / 200.0;
+        
+        // Transparancy falls, as the density increases
+        var col = vec4f( nebula_color( total_density, ls_dst ), total_density );
 
-  return color;
+        // Emission. The densier the medium gets, the brighter it shines
+        final_color += final_color.a * vec4( final_color.rgb, 0.0 ) * 0.2;	   
+        // Uniform scale density
+        col.a *= 0.2;
+        // Color by alpha
+        col *= vec4f( vec3f( col.a ), 1.0 );
+        // Alpha blend in contribution
+        final_color = final_color + col * ( 1.0 - final_color.a );
+      }
+
+      total_density += 1.0 / 70.0;
+      // Optimize step size near the camera and near the light source. The densier field - the bigger step
+      t += max( d * 0.1 * max( min( ls_dst, length( ro * k ) ), 1.0 ), 0.01 ) / k;
+    }
+  }
+
+  // Simple scattering
+	final_color *= 1.0 / exp( total_density * 0.2 ) * 0.8;
+
+  return smoothstep( vec3f( 0.0 ), vec3f( 1.0 ), final_color.rgb );
 }
 
-fn sea_octave( uv_in : vec2f, choppy : f32 ) -> f32
+fn nebula_color( density : f32, radius : f32 ) -> vec3f
+{
+	// Color based on density alone, gives impression of occlusion within the media
+  var result = mix( vec3(1.0), vec3(0.5), density );
+	
+	// color added to the media
+	let col_center = 7.0 * vec3( 0.8, 1.0, 1.0 );
+	let col_edge = 1.5 * vec3( 0.48, 0.53, 0.5 );
+	result *= mix( col_center, col_edge, min( ( radius + 0.05 ) / 0.9, 1.15 ) );
+	return result;
+}
+
+//https://en.wikipedia.org/wiki/Line%E2%80%93plane_intersection
+fn raytrace_plane
+( 
+  ro_in : vec3f, // Ray origin
+  rd_in : vec3f, // Ray direction
+  normal : vec3f, // Normal of the plane
+  p0 : vec3f // Any point on the plane
+) -> f32
+{
+  // If this equals 0.0, then the line is parallel to the plane
+  let RdotN = dot( rd_in, normal );
+  if RdotN == 0.0 { return -1.0; }
+
+  let t = dot( ( p0 - ro_in ), normal ) / RdotN;
+  return t;
+}
+
+fn raytrace_sphere( ro : vec3f, rd : vec3f, ce : vec3f, ra : f32 ) -> vec2f
+{
+  let oc = ro - ce;
+  let b = dot( oc, rd );
+  let c = dot( oc, oc ) - ra*ra;
+  var h = b*b - c;
+  if( h < 0.0 ) { return vec2( -1.0 ); } // no intersection
+  h = sqrt( h );
+  return vec2( -b-h, -b+h );
+}
+
+fn nebula_noise( p : vec3f ) -> f32
+{
+  var result = disk( p.xzy, vec3( 2.0, 1.8, 1.25 ) );
+  result += spiral_noise( p.zxy * 0.5123 + 100.0 ) * 3.0;
+  return result;
+}
+
+fn length2( p : vec2f ) -> f32
+{
+	return sqrt( p.x * p.x + p.y * p.y );
+}
+
+fn length8( p_in : vec2f ) -> f32
+{
+	var p = p_in * p_in; 
+  p = p * p; 
+  p = p * p;
+	return pow( p.x + p.y, 1.0 / 8.0 );
+}
+
+fn disk( p : vec3f, t : vec3f ) -> f32
+{
+  let q = vec2( length2( p.xy ) - t.x, p.z * 0.5 );
+  return max( length8( q ) - t.y, abs( p.z ) - t.z );
+}
+
+fn spiral_noise( p_in : vec3f ) -> f32
+{
+  var p = p_in;
+  var n = 0.0;	// noise amount
+  var iter = 2.0;
+  let nudge = 0.9; // size of perpendicular vector
+  let normalizer = 1.0 / sqrt( 1.0 + nudge * nudge ); // pythagorean theorem on that perpendicular to maintain scale
+  for( var i = 0; i < 8; i++ )
+  {
+    // add sin and cos scaled inverse with the frequency
+    n += -abs( sin( p.y * iter ) + cos( p.x * iter ) ) / iter;	// abs for a ridged look
+    // rotate by adding perpendicular and scaling down
+    p += vec3f( vec2f( p.y, -p.x ) * nudge, 0.0 );
+    p *= vec3f( normalizer, normalizer, 1.0 );
+    // rotate on other axis
+    let tmp = vec2f( p.z, -p.x ) * nudge;
+    p += vec3f( tmp.x, 0.0, tmp.y );
+    p *= vec3f( normalizer, 1.0, normalizer );
+    // increase the frequency
+    iter *= 1.733733;
+  }
+  return n;
+}
+
+fn water_octave( uv_in : vec2f, choppy : f32 ) -> f32
 {
   // Offset the uv value in y = x direction by the noise value
   let uv = uv_in + perlin_noise2dx1d( uv_in );
@@ -390,13 +538,13 @@ fn sea_octave( uv_in : vec2f, choppy : f32 ) -> f32
 }
 
 // Fbm based sea noise
-fn sea_noise( p : vec3f ) -> f32
+fn water_noise( p : vec2f ) -> f32
 {
   var freq = 0.16;
-  var amp = 0.6; // Height
+  var amp = 0.6;
   var choppy = 4.0;
   let octave_m = mat2x2( 1.6, 1.2, -1.2, 1.6 );
-  var uv = p.xz; 
+  var uv = p; 
   uv.x *= 0.75;
   
   var d = 0.0;
@@ -405,7 +553,7 @@ fn sea_noise( p : vec3f ) -> f32
   for( var i = 0; i < 5; i++ ) 
   { 
     // Mix two octaves for better detail
-    d = sea_octave( ( uv + u.time ) * freq, choppy ) + sea_octave( ( uv - u.time ) * freq, choppy );
+    d = water_octave( ( uv + u.time / 2.0 ) * freq, choppy ) + water_octave( ( uv - u.time / 2.0 ) * freq, choppy );
     // Add the height of the current octave to the sum
     h += d * amp;        
     // deform uv domain( rotate and stretch)
@@ -418,77 +566,14 @@ fn sea_noise( p : vec3f ) -> f32
   return h;
 }
 
-fn sea_normal( p : vec3f ) -> vec3f
+fn water_normal( p : vec2f ) -> vec3f
 {
   let e = 0.01;
   let offset = vec2f( 1.0, 0.0 ) * e;
-  let dfdx = ( sea_noise( p + offset.xyy ) - sea_noise( p - offset.xyy ) );
-  let dfdz = ( sea_noise( p + offset.yyx ) - sea_noise( p - offset.yyx ) );
-  let normal = normalize( vec3f( -dfdx, 2.0 * e, -dfdz ) );
+  let dfdx = ( water_noise( p + offset.xy ) - water_noise( p - offset.xy ) );
+  let dfdz = ( water_noise( p + offset.yx ) - water_noise( p - offset.yx ) );
+  let normal = normalize( vec3f( -dfdx, e / WATER_INTENSITY, -dfdz ) );
   return normal;
-}
-
-fn draw_patch
-(
-  ro_in : vec3f, 
-  rd_in : vec3f,
-  color_out : ptr< function, vec3f >
-)
-{
-  // Plane size
-  let ps = vec4f( -1.0, -1.0, 1.0, 1.0 ) * 1.0;
-  // Plane height
-  let ph = vec4f( -1.0, 1.0, 1.0, -1.0 ) * 0.5;
-
-  var ro = ro_in;
-  var rd = rd_in;
-
-  for( var i = 0; i < 3; i++)
-  {
-    // Rotate the camera to get a view from a different angle
-    var ro = rotz( 3.1415926 * f32( i ) / 3.0 ) * ro_in;
-    var rd = rotz( 3.1415926 * f32( i ) / 3.0 ) * rd_in;
-
-    var color = vec3f( 0.0 );
-    var c1 =  vec3f( 1.0, 0.0, 0.0 );
-    var c2 =  vec3f( 1.0, 0.0, 0.0 );
-
-    let t = iBilinearPatch( ro, rd, ps, ph );
-
-    // Precalculate colors
-    // fwidth is not allowed to be called from a non-uniform flow, so we precalculate some values
-    // even if they will not be used
-    {
-      var hit = ro + t * rd;
-      c1 = pallete( length( hit ) );
-      // Move a tiny bit forwrad to prevent itersection with at the current hit
-      hit = hit + 0.00001 * rd;
-
-      let t2 = iBilinearPatch( hit, rd, ps, ph );
-      hit = hit + t2 * rd;
-      c2 =  pallete( length( hit ) );
-    }
-
-    if t > 0.0
-    {
-      var hit = ro + t * rd;
-      if all( abs( hit ) <= vec3f( 1.0001 ) )
-      {
-        *color_out += c1;
-      }
-      else
-      {
-        hit = hit + 0.00001 * rd;
-        let t2 = iBilinearPatch( hit, rd, ps, ph );
-        hit = hit + t2 * rd;
-
-        if all( abs( hit ) <= vec3f( 1.0001 ) )
-        {
-          *color_out += c2;
-        }
-      }
-    }
-  }
 }
 
 fn raytrace_box
@@ -496,6 +581,7 @@ fn raytrace_box
   ro : vec3f, 
   rd : vec3f, 
   normal : ptr< function, vec3f >, // Normal at the hit point
+  box_dimension : vec3f,
   entering : bool
 )  -> f32
 {
@@ -507,7 +593,7 @@ fn raytrace_box
   // Now we need to offset the `t` to hit planes that build the box.
   // If we take a point in the corner of the box and calculate the distance needed to travel from that corner
   // to all three planes, we can then take that distance and subtruct/add to our `t`, to get the proper hit value.
-  let dt = BOX_DIMENSIONS * abs( dr );
+  let dt = box_dimension * abs( dr );
   
   // Planes facing us are closer, so we need to subtruct
   let pin = - dt - t;
@@ -516,7 +602,7 @@ fn raytrace_box
 
   // From the distances to all the front and back faces, we find faces of the box that are actually hit by the ray
   let tin = max( pin.x, max( pin.y, pin.z ) );
-  let tout = min( pout.x, min( pout.y, pout.z) );
+  let tout = min( pout.x, min( pout.y, pout.z ) );
 
   // Ray is outside of the box
   if tin > tout
@@ -538,102 +624,6 @@ fn raytrace_box
 }
 
 
-//>> Bilinear Patch
-// It's a plane that is by parametric equation using 4 points in space.
-// f( u, v ) = ( 1 - u) * ( 1 - v ) * p00 + u * ( 1 - v ) * p10 + ( 1 - u ) * v * p01 + u * v * p11;
-// Taken from here: https://pbr-book.org/4ed/Shapes/Bilinear_Patches
-//
-// The following two functions are taken from this shader: https://www.shadertoy.com/view/ltKBzG
-// It take as input the following
-// ro - ray origin
-// rd - ray direction
-// ps - plane size | ps.xy - define the minimun and px.zw - the maximux in size of the plane. Basically like a bounding box.
-// ph - plane height | Defines the height( Y ) of the plane at each of the 4 points. X and Z coordinatez are defined by the ps
-//
-// Having defined a bilinear patch and a line `ro + t * rd`, it finds `t` with which the line intersects the plane and returns the `t`
-fn iBilinearPatch( ro : vec3f, rd : vec3f, ps : vec4f, ph : vec4f ) -> f32
-{
-  let va : vec3f = vec3f( 0.0, 0.0, ph.x + ph.w - ph.y - ph.z );
-  let vb : vec3f = vec3f( 0.0, ps.w - ps.y, ph.z - ph.x );
-  let vc : vec3f = vec3f( ps.z - ps.x, 0.0, ph.y - ph.x );
-  let vd : vec3f = vec3f( ps.xy, ph.x );
-
-  let tmp = 1.0 / ( vb.y * vc.x );
-  let a = 0.0;
-  let b = 0.0;
-  let c = 0.0;
-  let d = va.z * tmp;
-  let e = 0.0;
-  let f = 0.0;
-  let g = (vc.z * vb.y - vd.y * va.z) * tmp;
-  let h = (vb.z * vc.x - va.z * vd.x) * tmp;
-  let i = -1.0;
-  let j = (vd.x * vd.y * va.z + vd.z * vb.y * vc.x) * tmp
-          - (vd.y * vb.z * vc.x + vd.x * vc.z * vb.y) * tmp;
-
-  let p = dot( vec3f( a, b, c ), rd.xzy * rd.xzy )
-          + dot( vec3f( d, e, f ), rd.xzy * rd.zyx );
-  let q = dot( vec3f( 2.0, 2.0, 2.0 ) * ro.xzy * rd.xyz, vec3f (a, b, c ) )
-          + dot( ro.xzz * rd.zxy, vec3f( d, d, e ) )
-          + dot( ro.yyx * rd.zxy, vec3f( e, f, f ) )
-          + dot( vec3f( g, h, i ), rd.xzy );
-  let r = dot( vec3f( a, b, c ), ro.xzy * ro.xzy )
-          + dot( vec3f( d, e, f ), ro.xzy * ro.zyx )
-          + dot( vec3f( g, h, i ), ro.xzy ) + j;
-  if abs( p ) < 0.000001 
-  {
-    return -r / q;
-  } 
-  else 
-  {
-    let sq = q * q - 4.0 * p * r;
-    if sq < 0.0 
-    {
-      return 0.0;
-    } 
-    else 
-    {
-      let s = sqrt( sq );
-      let t0 = ( -q + s ) / ( 2.0 * p );
-      let t1 = ( -q - s ) / ( 2.0 * p );
-
-      // Short way to type:
-      // return min(t0 < 0.0 ? t1 : t0, t1 < 0.0 ? t0 : t1);
-      // in wgsl
-      return min( mix( t1, t0, step( 0.0, t0 ) ), mix( t0, t1, step( 0.0, t1 ) ) );
-    }
-  }
-}
-
-/// If pos - position on the plane defined by ps and ph, then it return the normal at that point.
-fn nBilinearPatch( ps : vec4f,  ph : vec4f, pos : vec3f ) -> vec3f
-{
-  let va = vec3f( 0.0, 0.0, ph.x + ph.w - ph.y - ph.z );
-  let vb = vec3f( 0.0, ps.w - ps.y, ph.z - ph.x );
-  let vc = vec3f( ps.z - ps.x, 0.0, ph.y - ph.x );
-  let vd = vec3f( ps.xy, ph.x );
-
-  let tmp = 1.0 / ( vb.y * vc.x );
-  let a = 0.0;
-  let b = 0.0;
-  let c = 0.0;
-  let d = va.z * tmp;
-  let e = 0.0;
-  let f = 0.0;
-  let g = ( vc.z * vb.y - vd.y * va.z ) * tmp;
-  let h = ( vb.z * vc.x - va.z * vd.x ) * tmp;
-  let i = -1.0;
-  let j = ( vd.x * vd.y * va.z + vd.z * vb.y * vc.x ) * tmp
-          - ( vd.y * vb.z * vc.x + vd.x * vc.z * vb.y ) * tmp;
-
-  let grad = vec3f( 2.0 ) * pos.xzy * vec3f( a, b, c )
-    + pos.zxz * vec3f( d, d, e )
-    + pos.yyx * vec3f( f, e, f )
-    + vec3f( g, h, i );
-  return -normalize( grad );
-}
-//<< Bilinear Patch
-
 //
 // Different utilities
 //
@@ -649,44 +639,6 @@ fn freshel( view_dir : vec3f, halfway : vec3f, f0 : vec3f, critical_angle_cosine
   }
 
   return f0 + ( 1.0 - f0 ) * pow( ( 1.0 - VdotH ), 5.0 );
-}
-
-
-// The following function is taken from https://www.shadertoy.com/view/WlffDn
-// Function fcos() is a band-limited cos(x).
-//
-// Box-filtering of cos(x):
-//
-// (1/w)∫cos(t)dt with t ∈ (x-½w, x+½w)
-// = [sin(x+½w) - sin(x-½w)]/w
-// = cos(x)·sin(½w)/(½w)
-//
-// Can approximate smoothstep(2π,0,w) ≈ sin(w/2)/(w/2),
-// which you can also see as attenuating cos(x) when it 
-// oscilates more than once per pixel. More info:
-//
-// https://iquilezles.org/articles/bandlimiting
-fn fcos( x : vec3f ) -> vec3f
-{
-  let w = fwidth( x );
-  return cos( x ) * ( 1.0 - smoothstep( vec3f( 0.0 ), vec3f( 3.14 * 2.0 ), w ) ); // filtered-approx
-}
-
-// This function calculates smooth cos several times, each time decreasing frequency( and changing the offset a little ),
-// creating a more detailed ( more strips ) pallete.
-fn pallete( t : f32 ) -> vec3f
-{
-    var col = vec3( 0.3,0.4,0.5 );
-    col += 0.12 * fcos( 6.28318 * t *   1.0 + vec3( 0.0, 0.8, 1.1 ) );
-    col += 0.11 * fcos( 6.28318 * t *   3.1 + vec3( 0.3, 0.4, 0.1 ) );
-    col += 0.10 * fcos( 6.28318 * t *   5.1 + vec3( 0.1, 0.7, 1.1 ) );
-    col += 0.10 * fcos( 6.28318 * t *  17.1 + vec3( 0.2, 0.6, 0.7 ) );
-    col += 0.10 * fcos( 6.28318 * t *  31.1 + vec3( 0.1, 0.6, 0.7 ) );
-    col += 0.10 * fcos( 6.28318 * t *  65.1 + vec3( 0.0, 0.5, 0.8 ) );
-    col += 0.10 * fcos( 6.28318 * t * 115.1 + vec3( 0.1, 0.4, 0.7 ) );
-    col += 0.10 * fcos( 6.28318 * t * 265.1 + vec3( 1.1, 1.4, 2.7 ) );
-    
-    return col;
 }
 
 fn rotz( angle : f32 ) -> mat3x3< f32 >
@@ -775,50 +727,56 @@ fn remap( t_min_in : f32, t_max_in : f32, t_min_out : f32, t_max_out : f32, v : 
   return mix( t_min_out, t_max_out, k );
 }
 
-fn aces_tonemap( color : vec3f ) -> vec3f
-{  
-  let m1 = mat3x3
-  (
-    0.59719, 0.07600, 0.02840,
-    0.35458, 0.90834, 0.13383,
-    0.04823, 0.01566, 0.83777
-  );
-  let m2 = mat3x3
-  (
-    1.60475, -0.10208, -0.00327,
-    -0.53108,  1.10813, -0.07276,
-    -0.07367, -0.00605,  1.07602
-  );
-  let v = m1 * color;  
-  let a = v * ( v + 0.0245786 ) - 0.000090537;
-  let b = v * ( 0.983729 * v + 0.4329510 ) + 0.238081;
-  return pow( clamp( m2 * ( a / b ), vec3f( 0.0 ), vec3f( 1.0 ) ), vec3f( 1.0 / 2.2 ) );  
+// https://iquilezles.org/articles/boxfunctions/
+// https://www.shadertoy.com/view/WslGz4
+fn boxSoftShadow
+( 
+  ro : vec3f, 
+  rd : vec3f,
+  rad : vec3f,   // box semi-size
+  sk : f32 
+) -> f32
+{
+  let m = 1.0 / rd;
+  let n = m * ro;
+  let k = abs( m ) * rad;
+  let t1 = -n - k;
+  let t2 = -n + k;
+
+  let tN = max( max( t1.x, t1.y ), t1.z );
+  let tF = min( min( t2.x, t2.y ), t2.z );
+
+  if( tN > tF || tF < 0.0 )
+  {
+    var sh = 1.0;
+    sh = segShadow( ro.xyz, rd.xyz, rad.xyz, sh );
+    sh = segShadow( ro.yzx, rd.yzx, rad.yzx, sh );
+    sh = segShadow( ro.zxy, rd.zxy, rad.zxy, sh );
+    return smoothstep( 0.0, 1.0, sk * sqrt( sh ) );
+  }
+  return 0.0;
 }
 
-// Some very barebones but fast atmosphere approximation
-fn extra_cheap_atmosphere( raydir : vec3f, sundir : vec3f ) -> vec3f
-{
-  //sundir.y = max(sundir.y, -0.07);
-  let special_trick = 1.0 / (raydir.y * 1.0 + 0.1);
-  let special_trick2 = 1.0 / (sundir.y * 11.0 + 1.0);
-  let raysundt = pow(abs(dot(sundir, raydir)), 2.0);
-  let sundt = pow(max(0.0, dot(sundir, raydir)), 8.0);
-  let mymie = sundt * special_trick * 0.2;
-  let suncolor = mix(vec3(1.0), max(vec3f(0.0), vec3(1.0) - vec3f(5.5, 13.0, 22.4) / 22.4), special_trick2);
-  let bluesky= vec3f(5.5, 13.0, 22.4) / 22.4 * suncolor;
-  var bluesky2 = max(vec3(0.0), bluesky - vec3f(5.5, 13.0, 22.4) * 0.002 * (special_trick + -6.0 * sundir.y * sundir.y));
-  bluesky2 *= special_trick * (0.24 + raysundt * 0.24);
-  return bluesky2 * (1.0 + 1.0 * pow(1.0 - raydir.y, 3.0));
-} 
+fn dot2( v : vec3f ) -> f32 { return dot( v, v ); }
 
-// Get atmosphere color for given direction
-fn getAtmosphereColor( dir : vec3f ) -> vec3f
+fn segShadow( ro : vec3f, rd : vec3f, pa : vec3f, sh_in : f32 ) -> f32
 {
-  return extra_cheap_atmosphere( dir, MOON_LIGHT_DIR ) * 0.5;
-}
-
-// Get sun color for given direction
-fn getSunColor( dir : vec3f ) -> vec3f 
-{ 
-  return vec3f( pow( max( 0.0, dot( dir, MOON_LIGHT_DIR ) ), 720.0 ) * 210.0 );
+  var sh = sh_in;
+  let k1 = 1.0 - rd.x * rd.x;
+  let k4 = ( ro.x - pa.x ) * k1;
+  let k6 = ( ro.x + pa.x ) * k1;
+  let k5 = ro.yz * k1;
+  let k7 = pa.yz * k1;
+  let k2 = -dot( ro.yz, rd.yz );
+  let k3 = pa.yz * rd.yz;
+  
+  for( var i = 0; i < 4; i++ )
+  {
+    let ss = vec2f( vec2i( i & 1, i >> 1 ) ) * 2.0 - 1.0;
+    let thx = k2 + dot( ss, k3 );
+    if( thx < 0.0 ) { continue; } // behind
+    let thy = clamp( -rd.x * thx, k4, k6 );
+    sh = min( sh, dot2( vec3f( thy, k5 - k7 * ss ) + rd * thx ) / ( thx * thx ) );
+  }
+  return sh;
 }
