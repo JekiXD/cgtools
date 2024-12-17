@@ -75,10 +75,12 @@ fn fs_main( in : VSOut ) -> @location( 0 ) vec4f
   var vy = normalize( u.up );
   let vx = normalize( cross( vz, vy ) );
   vy = normalize( cross( vx, vz ) );
+  let m = mat3x3( vx, vy, vz );
 
   var rd = vec3f( ( in.pos.xy * 2.0 - u.resolution ) / u.resolution.x, 0.7 );
   rd.y *= -1.0;
-  rd = normalize( vx * rd.x + vy * rd.y + vz * rd.z );
+  //rd = normalize( vx * rd.x + vy * rd.y + vz * rd.z );
+  rd = normalize( m * rd );
 
   var final_color = vec3f( 0.0 );
 
@@ -88,40 +90,39 @@ fn fs_main( in : VSOut ) -> @location( 0 ) vec4f
   }
   else
   {
-     final_color = draw_background( ro, rd, light_source );
+    final_color = draw_background( ro, rd, light_source );
 
     var box_normal : vec3f;
     let box_t = raytrace_box( ro, rd, &box_normal, BOX_DIMENSIONS, true );
 
-
     if box_t > 0.0
     {
-      final_color = vec3f( 0.0 );
+      final_color = vec3f( 1.0 );
       var ro = ro + box_t * rd;
 
-      let w = box_normal;
-      let u = normalize( M.xyy * w.z - M.yyx * w.x - M.yyx * w.y );
-      let v = normalize( M.yxy * w.z + M.yxy * w.x - M.xyy * w.y );
-      let TBN = mat3x3( u, w, v );
+      // let w = box_normal;
+      // let u = normalize( M.xyy * w.z - M.yyx * w.x - M.yyx * w.y );
+      // let v = normalize( M.yxy * w.z + M.yxy * w.x - M.xyy * w.y );
+      // let TBN = mat3x3( u, w, v );
 
-      var uv = ro.xy * w.z + ro.xz * w.y + ro.yz * w.x;
-      uv *= INSIDES_NOISE;
+      // var uv = ro.xy * w.z + ro.xz * w.y + ro.yz * w.x;
+      // uv *= INSIDES_NOISE;
 
-      let n = normalize( TBN * water_normal( uv ) );
+      // let n = normalize( TBN * water_normal( uv ) );
 
-      let F = freshel( -rd, n, F0, CRITICAL_ANGLE_ATOB );
-      var refractedRD = refract( rd, n, iorAtoB );
-      let reflectedRD = normalize( reflect( rd, n ) );
+      // let F = freshel( -rd, n, F0, CRITICAL_ANGLE_ATOB );
+      // var refractedRD = refract( rd, n, iorAtoB );
+      // let reflectedRD = normalize( reflect( rd, n ) );
 
-      if length( refractedRD ) > 0.0
-      {
-        refractedRD = normalize( refractedRD );
-        let insides_color = draw_insides( ro, refractedRD, light_source );
-        final_color += ( 1.0 - F ) * insides_color;
-      }
+      // if length( refractedRD ) > 0.0
+      // {
+      //   refractedRD = normalize( refractedRD );
+      //   let insides_color = draw_insides( ro, refractedRD, light_source );
+      //   final_color += ( 1.0 - F ) * insides_color;
+      // }
 
-      let refl_color = draw_background( ro, reflectedRD, light_source );
-      final_color += F * refl_color;
+      // let refl_color = draw_background( ro, reflectedRD, light_source );
+      // final_color += F * refl_color;
 
       let edge_t = smooth_box_edge( ro );
       final_color = mix( final_color, BOX_EDGE_COLOR, edge_t ) ;
@@ -179,8 +180,8 @@ fn draw_background
       var plane_color = ( LdotN * diff_color + phong_value );
       plane_color *= attenuation; 
 
-      let shad = boxSoftShadow( plane_hit, normalize( light_source - plane_hit ), BOX_DIMENSIONS, 2.0 );
-      plane_color *= smoothstep( -0.2, 1.0, shad );
+      // let shad = boxSoftShadow( plane_hit, normalize( light_source - plane_hit ), BOX_DIMENSIONS, 2.0 );
+      // plane_color *= smoothstep( -0.2, 1.0, shad );
 
       final_color = mix
       ( 

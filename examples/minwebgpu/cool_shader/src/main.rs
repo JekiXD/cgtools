@@ -35,7 +35,7 @@ async fn run() -> Result< (), gl::WebGPUError >
   let presentation_format = gl::context::preferred_format();
   gl::context::configure( &device, &context, presentation_format )?;
   
-  let shader = gl::ShaderModule::new( include_str!( "../shaders/shader.wgsl" ) ).create( &device );
+  let shader = gl::ShaderModule::new( include_str!( "../shaders/shader_main.wgsl" ) ).create( &device );
   
   let render_pipeline = gl::render_pipeline::create
   (

@@ -33,6 +33,8 @@ struct Uniforms
 
 // Shaders used:
 // https://www.shadertoy.com/view/MdKXzc
+// https://www.shadertoy.com/view/tsVXzh
+// https://www.shadertoy.com/view/Ms2SD1
 
 
 const PI : f32 = 3.14159265;
@@ -75,14 +77,11 @@ fn fs_main( in : VSOut ) -> @location( 0 ) vec4f
   var vy = normalize( u.up );
   let vx = normalize( cross( vz, vy ) );
   vy = normalize( cross( vx, vz ) );
-
-  // Ray direction u.resolution.y / u.resolution.x
-  var uv = ( in.pos.xy * 2.0 - u.resolution ) / u.resolution;
-  uv = uv * 0.5 + 0.5;
+  let m = mat3x3( vx, vy, vz );
 
   var rd = vec3f( ( in.pos.xy * 2.0 - u.resolution ) / u.resolution.x, 0.7 );
   rd.y *= -1.0;
-  rd = normalize( vx * rd.x + vy * rd.y + vz * rd.z );
+  rd = normalize( m * rd );
 
   var final_color = vec3f( 0.0 );
 
@@ -92,15 +91,15 @@ fn fs_main( in : VSOut ) -> @location( 0 ) vec4f
   }
   else
   {
-     final_color = draw_background( ro, rd, light_source );
+    final_color = draw_background( ro, rd, light_source );
 
     var box_normal : vec3f;
     let box_t = raytrace_box( ro, rd, &box_normal, BOX_DIMENSIONS, true );
 
-
     if box_t > 0.0
     {
       final_color = vec3f( 0.0 );
+      // Intersection point on the box
       var ro = ro + box_t * rd;
 
       let w = box_normal;
@@ -171,16 +170,24 @@ fn draw_background
     let uv = abs( plane_hit.xz );
     if all( uv <= vec2f( plane_size ) )
     {
+      // Calculate the distance to the light source
       let r = length( light_source - plane_hit );
+      // Attenuation of the light, that can be controlled by the `LIGHT_POWER` constant
       let attenuation = LIGHT_POWER / ( r * r );
 
+      // Direction to the light source
       let light_dir = normalize( light_source - plane_hit );
       let LdotN = saturate( dot( light_dir, plane_normal ) );
+      // Half vector between the view direction and the light direction
       let H = normalize( light_dir - rd_in );
+      // Adds a specular reflection
       let phong_value = pow( saturate( dot( plane_normal, H ) ), 16.0 ) * 0.1;
 
+      // Diffuse color of the plane
       var diff_color = vec3f( 1.0 );
+      // Apply lighting 
       var plane_color = ( LdotN * diff_color + phong_value );
+      // Reduce by the attenuation
       plane_color *= attenuation; 
 
       let shad = boxSoftShadow( plane_hit, normalize( light_source - plane_hit ), BOX_DIMENSIONS, 2.0 );
@@ -283,7 +290,7 @@ fn generate_stars
   uv_in : vec2f,
   grid_size : f32,
   star_size : f32,
-  ray_width : f32,
+  flares_width : f32,
   twinkle : bool
 ) -> vec3f
 {
@@ -291,7 +298,9 @@ fn generate_stars
   let cell_id = floor( uv );
   let cell_coords = fract( uv ) - 0.5;
   var star_coords = hash2dx2d( cell_id ) - 0.5;
-  star_coords -= vec2f( star_size * 2.0 );
+  //star_coords -= vec2f( star_size * 2.0 );
+
+  star_coords -= sign( star_coords ) * max( vec2f( star_size ) - vec2f( 0.5 ) - abs( star_coords ), vec2f( 0.0 ) );
 
   let delta_coords = abs( star_coords - cell_coords );
   // Distance to the star from the cell coordinates
@@ -303,10 +312,10 @@ fn generate_stars
   if twinkle
   {
     let twinkle_change = remap( -1.0, 1.0, 0.5, 1.0, sin( u.time * 3.0 + uv.x * uv.y ) );
-    let rays = smoothstep( ray_width, 0, delta_coords.x ) * smoothstep( star_size * twinkle_change, 0, dist ) +
-    smoothstep( ray_width, 0, delta_coords.y ) * smoothstep( star_size * twinkle_change, 0, dist );
+    let flares = smoothstep( flares_width, 0, delta_coords.x ) * smoothstep( star_size * twinkle_change, 0, dist ) +
+    smoothstep( flares_width, 0, delta_coords.y ) * smoothstep( star_size * twinkle_change, 0, dist );
     
-    glow = glow * rays;
+    glow = glow * flares;
   }
 
   return glow * brightness;
@@ -319,14 +328,14 @@ fn draw_stars
 {
   var final_color = vec3f( 0.0 );
 
-  let theta = atan2( rd_in.x, rd_in.z );
-  let phi = asin( rd_in.y );
+  let phi = atan2( rd_in.x, rd_in.z );
+  let theta = asin( rd_in.y );
 
   let normalization = vec2f( 0.1591, 0.3183 );
-  var uv = vec2f( theta, phi ) * normalization + vec2f( 0.5 );
+  var uv = vec2f( phi, theta ) * normalization + vec2f( 0.5 );
   var grid_size = 10.0;
   var star_size = 0.07;
-  let ray_width = 0.005;
+  let flares_width = 0.005;
   let star_color = vec3f( 1.0 );
 
   let star_size_change = 0.9;
@@ -335,7 +344,7 @@ fn draw_stars
   // Big start are animated
   for( var i = 0; i < 3; i++ )
   {
-    final_color += generate_stars( uv, grid_size, star_size, ray_width, true );
+    final_color += generate_stars( uv, grid_size, star_size, flares_width, true );
     star_size *= star_size_change;
     grid_size *= grid_size_change;
   }
@@ -345,7 +354,7 @@ fn draw_stars
   // Small stars are not animated
   for( var i = 3; i < 6; i++ )
   {
-    final_color += generate_stars( uv, grid_size, star_size, ray_width, false );
+    final_color += generate_stars( uv, grid_size, star_size, flares_width, false );
     star_size *= star_size_change;
     grid_size *= grid_size_change;
   }
@@ -556,7 +565,7 @@ fn water_noise( p : vec2f ) -> f32
     d = water_octave( ( uv + u.time / 2.0 ) * freq, choppy ) + water_octave( ( uv - u.time / 2.0 ) * freq, choppy );
     // Add the height of the current octave to the sum
     h += d * amp;        
-    // deform uv domain( rotate and stretch)
+    // Deform uv domain( rotate and stretch)
     uv *= octave_m; 
     freq *= 1.9; 
     amp *= 0.22;
