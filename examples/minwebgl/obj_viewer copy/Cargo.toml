@@ -1,0 +1,24 @@
+[package]
+name = "minwebgl_obj_viewer123"
+version = "0.1.0"
+edition = "2021"
+authors = [ 
+  "Kostiantyn Mysnyk <wandalen@obox.systems>",
+  "Avramenko Yevhenii <yevhenii.av@obox.systems>" 
+]
+
+[dependencies]
+
+minwebgl = { workspace = true, features = [ "future", "math", "diagnostics" ] }
+tobj =  { workspace = true }
+mingl = { workspace = true, features = [ "camera_orbit_controls" ] }
+
+[dependencies.web-sys]
+workspace = true
+features = [
+  'MouseEvent',
+  'PointerEvent',
+  'WheelEvent',
+  'WebGlTexture',
+  'HtmlImageElement'
+]
