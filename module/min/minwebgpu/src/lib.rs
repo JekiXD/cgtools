@@ -43,6 +43,7 @@ mod_interface!
   layer transform;
   layer buffer;
   layer mem;
+  #[ cfg( feature = "log" ) ]
   layer log;
   #[ cfg( feature = "math" ) ]
   layer math;
