@@ -1,0 +1,25 @@
+[package]
+name = "minwebgpu_noise_viewer"
+version = "0.1.0"
+edition = "2021"
+authors = [ 
+  "Kostiantyn Mysnyk <wandalen@obox.systems>",
+  "Avramenko Yevhenii <yevhenii.av@obox.systems>" 
+]
+license = "MIT"
+
+
+[dependencies.minwebgpu]
+workspace = true
+features = [
+  'future',
+  'file',
+  'log'
+]
+
+[dependencies.web-sys]
+workspace = true
+features = [
+  'HtmlOptionElement'
+]
+

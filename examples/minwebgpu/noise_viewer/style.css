@@ -1,0 +1,30 @@
+html {
+    width: 100%;
+    height: 100%;
+}
+body {
+    margin: 0px;
+    width: 100%;
+    height: 100%;
+    background-color: black;
+}
+
+canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+#settings {
+    position: absolute;
+    display: flex;
+}
+
+#settings>div {
+    margin-right: 10px;
+}
+
+select {
+    font-size: 30px;
+    padding: 2px 5px;
+}
