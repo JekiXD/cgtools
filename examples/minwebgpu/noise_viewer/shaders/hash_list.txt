@@ -1,1 +1,10 @@
+LinearCongruentialGenerator_11
+HashWIthoutSine_11
+RandFast_21
+BlumBlumShub_11
+esgtsa_11
+JKISS32_21
+InterleavedGradientNoise_21
+CityHash_11
 simple_21
+IntegerHashI_11

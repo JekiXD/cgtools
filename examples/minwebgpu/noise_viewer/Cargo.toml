@@ -8,18 +8,27 @@ authors = [
 ]
 license = "MIT"
 
+[dependencies]
+bytemuck = { workspace = true }
+wasm-bindgen = { workspace = true }
+serde-wasm-bindgen = "0.6.5"
+lazy_static = "1.5.0"
+serde = { version = "1.0", features = ["derive"] }
 
 [dependencies.minwebgpu]
 workspace = true
 features = [
   'future',
   'file',
-  'log'
+  'log',
+  'math'
 ]
 
 [dependencies.web-sys]
 workspace = true
 features = [
-  'HtmlOptionElement'
+  'HtmlOptionElement',
+  'HtmlSelectElement',
+  'Event'
 ]
 

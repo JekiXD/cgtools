@@ -8,8 +8,8 @@ fn noise( pos : vec2f ) -> f32
 
   return mix
   (
-    mix( hash( cell_id + vec2f( 0.0, 0.0 ) ), hash( cell_id + vec2f( 1.0, 0.0 ) ), t.x ),
-    mix( hash( cell_id + vec2f( 0.0, 1.0 ) ), hash( cell_id + vec2f( 1.0, 1.0 ) ), t.x ),
+    mix( get_hash( cell_id + vec2f( 0.0, 0.0 ) ), get_hash( cell_id + vec2f( 1.0, 0.0 ) ), t.x ),
+    mix( get_hash( cell_id + vec2f( 0.0, 1.0 ) ), get_hash( cell_id + vec2f( 1.0, 1.0 ) ), t.x ),
     t.y
   );
 }

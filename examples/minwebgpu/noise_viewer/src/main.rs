@@ -1,11 +1,48 @@
 //! Just draw a large point in the middle of the screen.
 
-use minwebgpu::{self as gl, JsCast};
+use std::{cell::RefCell, rc::Rc};
+use serde::{Serialize, Deserialize};
+use lazy_static::lazy_static;
 
-mod app;
+use minwebgpu::{self as gl, JsCast, JsValue};
+use gl::web_sys::wasm_bindgen::prelude::Closure;
+use renderer::Renderer;
+use shader::ShaderComponents;
+
+mod renderer;
 mod shader;
+mod uniform;
+mod lil_gui;
 
-pub async fn load_dir( dir : &str ) -> Result< String, gl::JsValue >
+const NOISES : &'static str = include_str!( "../shaders/noise_list.txt" );
+const HASHES : &'static str =  include_str!( "../shaders/hash_list.txt" );
+
+lazy_static! 
+{
+  static ref NOISE_LIST : Vec< String > = {
+    NOISES
+    .lines()
+    .map( | v | v.to_string() )
+    .collect::< Vec< String > >()
+  };
+
+  static ref HASH_LIST : Vec< String > = {
+    HASHES
+    .lines()
+    .map( | v | v.to_string() )
+    .collect::< Vec< String > >()
+  };
+}
+
+#[ derive( Default, Debug, Serialize, Deserialize ) ]
+pub struct GUISettings
+{
+  hash : String,
+  noise : String
+}
+
+
+pub async fn load_file( file : &str ) -> Result< String, gl::JsValue >
 {
 
   let opts = gl::web_sys::RequestInit::new();
@@ -14,7 +51,7 @@ pub async fn load_dir( dir : &str ) -> Result< String, gl::JsValue >
 
   let window = gl::web_sys::window().unwrap();
   let origin = window.location().origin().unwrap();
-  let url = format!( "{}/{}", origin, dir );
+  let url = format!( "{}/{}", origin, file );
 
   let request = gl::web_sys::Request::new_with_str_and_init( &url, &opts ).expect( "Invalid url" );
 
@@ -44,71 +81,80 @@ async fn run() -> Result< (), gl::WebGPUError >
   let queue = device.queue();
   let presentation_format = gl::context::preferred_format();
   gl::context::configure( &device, &context, presentation_format )?;
+ 
+  let gui = lil_gui::new_gui();
 
-  // Setup
-  // Load noises
-  {
-    let noise_settings =  document.query_selector( "#noise_settings select" ).unwrap().unwrap();
-    let noise_list = load_dir("shaders/noise_list.txt").await.unwrap()
-    .lines()
-    .map( | l |
-    {
-      l.to_string()
-    })
-    .collect::< Vec< String > >();
+  let noise_list = NOISES.lines().map( | v | v.to_string() ).collect::< Vec< String > >();
+  let hash_list = HASHES.lines().map( | v | v.to_string() ).collect::< Vec< String > >();
 
-    for n in noise_list.iter()
-    {
-      let element = document.create_element( "option" ).unwrap();
-      let element : gl::web_sys::HtmlOptionElement = element.dyn_into().unwrap();
-      element.set_text_content( Some( &n ) );
-      noise_settings.append_child( &element ).unwrap();
-    }
-  }
-  // Load hashes
-  {
-    let hash_settings =  document.query_selector( "#hash_settings select" ).unwrap().unwrap();
-    let hash_list = load_dir("shaders/hash_list.txt").await.unwrap()
-    .lines()
-    .map( | l |
-    {
-      l.to_string()
-    })
-    .collect::< Vec< String > >();
+  let mut settings =  GUISettings::default();
+  settings.hash = HASH_LIST[ 0 ].clone();
+  settings.noise = NOISE_LIST[ 0 ].clone();
 
-    for h in hash_list.iter()
-    {
-      let element = document.create_element( "option" ).unwrap();
-      let element : gl::web_sys::HtmlOptionElement = element.dyn_into().unwrap();
-      element.set_text_content( Some( &h ) );
-      hash_settings.append_child( &element ).unwrap();
-    }
-  }
-  //
-  
-  let vertex_main_shader = gl::ShaderModule::new( include_str!( "../shaders/vertex_main.wgsl" ) ).create( &device );
-  let fragment_2d_main_shader = gl::ShaderModule::new( include_str!( "../shaders/fragment_2d_main.wgsl" ) ).create( &device );
-  
-  let render2d_pipeline = gl::render_pipeline::create
+  let mut shader_components = ShaderComponents::default();
+  shader_components.load_hash( &settings.hash ).await;
+  shader_components.load_noise( &settings.noise ).await;
+  let settings = serde_wasm_bindgen::to_value( &settings ).expect( "Failed to serialize settings" );
+
+  let renderer = Rc::new( RefCell::new( Renderer::new( &device, &document, presentation_format, shader_components )? ) );
+
+  let noise_dropdown = lil_gui::add_dropdown( &gui, &settings, "noise", NOISE_LIST.clone() );
+  let hash_dropdown = lil_gui::add_dropdown( &gui, &settings, "hash", HASH_LIST.clone() );
+
+
+  let on_change_noise : Closure< dyn Fn( _ ) > =  Closure::new
   (
-    &device, 
-    &gl::render_pipeline::desc( gl::VertexState::new( &vertex_main_shader ) )
-    .fragment
-    ( 
-      gl::FragmentState::new( &fragment_2d_main_shader ) 
-      .target
-      ( 
-        gl::ColorTargetState::new()
-        .format( presentation_format ) 
-      )
-    )
-    .into()
-  )?;
+    {
+      let renderer = renderer.clone();
+      move | v : String |
+      {
+        let renderer = renderer.clone();
+        let _ = gl::future_to_promise
+        ( 
+          async move
+          { 
+            renderer.borrow_mut().set_noise( &v ).await;
+            Ok( JsValue::from( 1 ) )
+          }
+        );
+      }
+    }
+  );
+
+  let on_change_hash : Closure< dyn Fn( _ ) > =  Closure::new
+  (
+    {
+      let renderer = renderer.clone();
+      move | v : String |
+      {
+        let _ = gl::future_to_promise
+        ( 
+          async move
+          { 
+            renderer.borrow_mut().set_noise( &v ).await;
+            Ok( JsValue::from( 1 ) )
+          }
+        );
+      }
+    }
+  );
+
+  lil_gui::on_change_parameter( &noise_dropdown, &on_change_noise.as_ref().unchecked_ref() );
+  lil_gui::on_change_parameter( &hash_dropdown, &on_change_hash.as_ref().unchecked_ref() );
+  on_change_hash.forget();
+  on_change_noise.forget();
+
+  
 
   let update_and_draw =
   {
     move | t : f64 |
     {
+      let width = canvas.width();
+      let height = canvas.height();
+      renderer.borrow_mut().set_resolution( [ width as f32, height as f32 ].into() );
+      renderer.borrow_mut().update( &device, &queue ).unwrap();
+
       let canvas_texture = gl::context::current_texture( &context ).unwrap();
       let canvas_view = gl::texture::view( &canvas_texture ).unwrap();
 
@@ -120,7 +166,8 @@ async fn run() -> Result< (), gl::WebGPUError >
         .into()
       ).unwrap();
 
-      render_pass.set_pipeline( &render2d_pipeline );
+      render_pass.set_pipeline( &renderer.borrow().render_pipeline );
+      render_pass.set_bind_group( 0, Some( &renderer.borrow().uniforms_state.bind_group ) );
       render_pass.draw( 3 );
       render_pass.end();
 
