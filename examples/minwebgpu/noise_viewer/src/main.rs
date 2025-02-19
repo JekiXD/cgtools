@@ -127,11 +127,12 @@ async fn run() -> Result< (), gl::WebGPUError >
       let renderer = renderer.clone();
       move | v : String |
       {
+        let renderer = renderer.clone();
         let _ = gl::future_to_promise
         ( 
           async move
           { 
-            renderer.borrow_mut().set_noise( &v ).await;
+            renderer.borrow_mut().set_hash( &v ).await;
             Ok( JsValue::from( 1 ) )
           }
         );
@@ -152,8 +153,14 @@ async fn run() -> Result< (), gl::WebGPUError >
     {
       let width = canvas.width();
       let height = canvas.height();
-      renderer.borrow_mut().set_resolution( [ width as f32, height as f32 ].into() );
-      renderer.borrow_mut().update( &device, &queue ).unwrap();
+      if let Ok( mut renderer ) = renderer.try_borrow_mut()
+      {
+        renderer.set_resolution( [ width as f32, height as f32 ].into() );
+        renderer.update( &device, &queue ).unwrap();
+        gl::log::info!("Borrowed");
+      
+      // renderer.borrow_mut().set_resolution( [ width as f32, height as f32 ].into() );
+      // renderer.borrow_mut().update( &device, &queue ).unwrap();
 
       let canvas_texture = gl::context::current_texture( &context ).unwrap();
       let canvas_view = gl::texture::view( &canvas_texture ).unwrap();
@@ -166,12 +173,13 @@ async fn run() -> Result< (), gl::WebGPUError >
         .into()
       ).unwrap();
 
-      render_pass.set_pipeline( &renderer.borrow().render_pipeline );
-      render_pass.set_bind_group( 0, Some( &renderer.borrow().uniforms_state.bind_group ) );
+      render_pass.set_pipeline( &renderer.render_pipeline );
+      render_pass.set_bind_group( 0, Some( &renderer.uniforms_state.bind_group ) );
       render_pass.draw( 3 );
       render_pass.end();
 
       gl::queue::submit( &queue, command_encoder.finish() );
+      }
       true
     }
   };

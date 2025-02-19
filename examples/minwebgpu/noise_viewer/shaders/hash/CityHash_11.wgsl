@@ -10,7 +10,7 @@ fn mur( a_in : u32, h_in : u32 ) -> u32
   return h * 5u + 0xe6546b64u;
 }
 
-fn fmix( h_in : u32 ) -> f32
+fn fmix( h_in : u32 ) -> u32
 {
   var h = h_in;
   h ^= h >> 16;
