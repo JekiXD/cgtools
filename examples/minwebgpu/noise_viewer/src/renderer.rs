@@ -1,15 +1,7 @@
 use minwebgpu::{ self as gl };
-use lazy_static::lazy_static;
 
 use crate::{shader::ShaderComponents, uniform::UniformsState};
 
-lazy_static! {
-  static ref FRAGMENT_2D_MAIN : String = {
-    String::from( include_str!( "../shaders/fragment_2d_main.wgsl" ) )
-  };
-}
-
-const VERTEX_MAIN : &'static str = include_str!( "../shaders/vertex_main.wgsl" );
 const HASH_GLUE : &'static str = include_str!( "../shaders/hash_glue.wgsl" );
 
 pub struct Renderer

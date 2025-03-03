@@ -7,32 +7,25 @@ use lazy_static::lazy_static;
 use minwebgpu::{self as gl, JsCast, JsValue};
 use gl::web_sys::wasm_bindgen::prelude::Closure;
 use renderer::Renderer;
-use shader::ShaderComponents;
 
 mod renderer;
-mod shader;
 mod uniform;
 mod lil_gui;
+mod assembler;
+mod loader;
 
-const NOISES : &'static str = include_str!( "../shaders/noise_list.txt" );
-const HASHES : &'static str =  include_str!( "../shaders/hash_list.txt" );
+const NOISE_LIST : &'static[ &'static str ] = 
+&[
+  "perlin_21",
+  "perlin1_21",
+  "perlin2_21",
+  "perlin3_21",
+];
 
-lazy_static! 
-{
-  static ref NOISE_LIST : Vec< String > = {
-    NOISES
-    .lines()
-    .map( | v | v.to_string() )
-    .collect::< Vec< String > >()
-  };
-
-  static ref HASH_LIST : Vec< String > = {
-    HASHES
-    .lines()
-    .map( | v | v.to_string() )
-    .collect::< Vec< String > >()
-  };
-}
+const HASH_LIST : &'static[ &'static str ] =
+&[
+  "fasthash"
+];
 
 #[ derive( Default, Debug, Serialize, Deserialize ) ]
 pub struct GUISettings
@@ -84,12 +77,10 @@ async fn run() -> Result< (), gl::WebGPUError >
  
   let gui = lil_gui::new_gui();
 
-  let noise_list = NOISES.lines().map( | v | v.to_string() ).collect::< Vec< String > >();
-  let hash_list = HASHES.lines().map( | v | v.to_string() ).collect::< Vec< String > >();
 
   let mut settings =  GUISettings::default();
-  settings.hash = HASH_LIST[ 0 ].clone();
-  settings.noise = NOISE_LIST[ 0 ].clone();
+  settings.hash = HASH_LIST[ 0 ].to_string();
+  settings.noise = NOISE_LIST[ 0 ].to_string();
 
   let mut shader_components = ShaderComponents::default();
   shader_components.load_hash( &settings.hash ).await;
