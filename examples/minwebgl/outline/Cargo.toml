@@ -1,5 +1,5 @@
 [package]
-name = "narrow_outline"
+name = "outline"
 version = "0.1.0"
 edition = "2021"
 authors = [ 
@@ -8,14 +8,13 @@ authors = [
 ]
 
 [dependencies]
+#browser_input = { git = "https://https://github.com/Wandalen/cgtools.git", rev = "72cfcb191ecd05c657726692634cbed829b6136c" }
 minwebgl = { workspace = true, features = [ "future" ] }
 mingl = { workspace = true, features = [ "camera_orbit_controls" ] }
+renderer = { workspace = true }
+glam = "0.29.0"
 ndarray_cg = { workspace = true }
-gltf = { workspace = true }
-rand = { workspace = true }
-getrandom = { workspace = true }
-csgrs = { workspace = true }
-parry3d = { workspace = true }
+gltf = "1.4" 
 
 [dependencies.web-sys]
 workspace = true
@@ -30,7 +29,6 @@ features = [
     'WebGlUniformLocation',
     'WebGlActiveInfo',
     'WebGlBuffer',
-    'WebGlRenderbuffer',
     'WebGlVertexArrayObject',
     'WebGlSync',
     'console',
