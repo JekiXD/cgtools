@@ -1,25 +1,13 @@
+
+
+use std::{cell::RefCell, rc::Rc};
+
 use mingl::CameraOrbitControls;
 use minwebgl::{ self as gl, JsCast };
-use gl::
+use web_sys::
 {
-  web_sys::
-  {
-    WebGlUniformLocation,
-    wasm_bindgen::prelude::Closure, 
-    HtmlCanvasElement
-  }
-};
-use ndarray_cg::
-{
-  mat3x3h::perspective_rh_gl,
-  F32x4x4,
-  F32x3,
-  F32x2
-};
-use std::
-{ 
-  cell::RefCell, 
-  rc::Rc 
+  wasm_bindgen::prelude::Closure, 
+  HtmlCanvasElement
 };
 
 enum CameraState
@@ -29,7 +17,8 @@ enum CameraState
   None
 }
 
-pub fn setup_controls
+
+pub fn bind_controls_to_input
 (
   canvas : &HtmlCanvasElement,
   camera : &Rc< RefCell< CameraOrbitControls > >
@@ -152,112 +141,4 @@ pub fn setup_controls
 
   canvas.set_onpointerout( Some( on_pointer_out.as_ref().unchecked_ref() ) );
   on_pointer_out.forget();
-}
-
-pub struct Camera
-{
-  controls : Rc< RefCell< CameraOrbitControls > >,
-  aspect_ratio : f32,
-  fov : f32,
-  near : f32,
-  far : f32,
-  projection_matrix : F32x4x4,
-}
-
-impl Camera
-{
-  pub fn new
-  (
-    eye : F32x3,
-    up : F32x3,
-    look_at : F32x3,
-    aspect_ratio : f32,
-    fov : f32,
-    near : f32,
-    far : f32
-  ) -> Self
-  {
-    let projection_matrix = perspective_rh_gl
-    (
-      fov,
-      aspect_ratio,
-      near,
-      far
-    );
-
-    let controls = CameraOrbitControls
-    {
-      eye : eye,
-      up : up,
-      center : look_at,
-      fov,
-      rotation_speed_scale : 200.0,
-      ..Default::default()
-    };
-
-    let controls = Rc::new( RefCell::new( controls ) );
-
-    Self
-    {
-      controls,
-      near,
-      far,
-      aspect_ratio,
-      fov,
-      projection_matrix
-    }
-  }
-
-  pub fn apply
-  (
-    &self,
-    gl : &gl::WebGl2RenderingContext,
-    view_loc : &WebGlUniformLocation,
-    projection_loc : &WebGlUniformLocation
-  )
-  {
-    let view_matrix = self.get_view_matrix().to_array();
-    let projection_matrix = self.get_projection_matrix();
-
-    gl::uniform::matrix_upload
-    (
-      &gl,
-      Some( view_loc.clone() ),
-      &view_matrix[ .. ],
-      true
-    ).unwrap();
-
-    gl::uniform::matrix_upload
-    (
-      &gl,
-      Some( projection_loc.clone() ),
-      projection_matrix.to_array().as_slice(),
-      true
-    ).unwrap();
-  }
-
-  pub fn set_window_size( &mut self, window_size : F32x2 )
-  {
-    self.controls.borrow_mut().set_size( window_size.to_array() );
-  }
-
-  pub fn get_controls( &self ) -> Rc< RefCell< CameraOrbitControls > >
-  {
-    self.controls.clone()
-  }
-
-  pub fn get_eye( &self ) -> F32x3
-  {
-    self.controls.borrow().eye
-  }
-
-  pub fn get_view_matrix( &self ) -> F32x4x4
-  {
-    self.controls.borrow().view()
-  }
-
-  pub fn get_projection_matrix( &self ) -> F32x4x4
-  {
-    self.projection_matrix
-  }
 }
