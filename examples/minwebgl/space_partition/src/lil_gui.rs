@@ -1,6 +1,5 @@
 use minwebgl as gl;
 use gl::wasm_bindgen::{ self, prelude::* };
-use web_sys::js_sys::Array;
 
 #[ wasm_bindgen( module = "/gui.js" ) ]
 extern "C"
@@ -29,15 +28,20 @@ extern "C"
 
   #[ allow( unsafe_code ) ]
   #[ wasm_bindgen( js_name = "onFinishChange" ) ]
-  pub fn on_finish_change( gui : &JsValue, callback : &web_sys::js_sys::Function );
+  pub fn on_finish_change( gui : &JsValue, callback : &Closure< dyn FnMut( JsValue ) > ) -> JsValue;
 
   #[ allow( unsafe_code ) ]
-  #[ wasm_bindgen( js_name = "getTitle" ) ]
-  pub fn get_title( gui : &JsValue ) -> String;
+  #[ wasm_bindgen( js_name = "onChange" ) ]
+  pub fn on_change( gui : &JsValue, callback : &Closure< dyn FnMut( f32 ) > ) -> JsValue;
 
   #[ allow( unsafe_code ) ]
-  #[ wasm_bindgen( js_name = "getFolders" ) ]
-  pub fn get_folders( gui : &JsValue ) -> Array;
+  #[ wasm_bindgen( js_name = "onChange" ) ]
+  pub fn on_change_string( gui : &JsValue, callback : &Closure< dyn FnMut( String ) > ) -> JsValue;
+
+  #[ allow( unsafe_code ) ]
+  #[ wasm_bindgen( js_name = "setName" ) ]
+  pub fn set_name( gui : &JsValue, value : &str ) -> JsValue;
+
 
   #[ allow( unsafe_code ) ]
   #[ wasm_bindgen( js_name = "hide" ) ]
