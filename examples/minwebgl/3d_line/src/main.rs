@@ -40,8 +40,6 @@ struct Settings
   alpha_to_coverage : bool,
   #[ serde( rename = "World units" ) ]
   world_units : bool,
-  #[ serde( rename = "Dashes" ) ]
-  dashes : bool,
   #[ serde( rename = "Trail length" ) ]
   trail_length : f32,
   #[ serde( rename = "Simulation speed" ) ]
@@ -101,7 +99,6 @@ fn run() -> Result< (), gl::WebglError >
     screen_width : screen_width,
     alpha_to_coverage : true,
     world_units : true,
-    dashes : true,
     trail_length : 300.0,
     simulation_speed : 0.003,
   };
@@ -125,7 +122,6 @@ fn run() -> Result< (), gl::WebglError >
     line.use_vertex_color( true );
     line.use_alpha_to_coverage( settings.alpha_to_coverage );
     line.use_world_units( settings.world_units );
-    line.use_dash( settings.dashes );
     line.mesh_create( &gl, None )?;
 
     let mesh = line.mesh_get_mut()?;
@@ -248,25 +244,6 @@ fn run() -> Result< (), gl::WebglError >
           {
             lines[ i ].mesh_get_mut().unwrap().upload( &gl, "u_width", &settings.screen_width ).unwrap();
           }
-        }
-      }
-    }
-  );
-  lil_gui::on_change_bool( &prop, &callback );
-  callback.forget();
-
-  let prop = lil_gui::add_boolean( &gui, &object, "Dashes" );
-  let callback = Closure::new
-  (
-    {
-      let lines = lines.clone();
-      let gl = gl.clone();
-      move | value : bool |
-      {
-        let mut lines = lines.borrow_mut();
-        for i in 0..lines.len()
-        {
-          lines[ i ].use_dash( value );
         }
       }
     }
