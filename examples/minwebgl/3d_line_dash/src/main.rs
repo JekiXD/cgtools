@@ -118,6 +118,8 @@ fn run() -> Result< (), gl::WebglError >
   let background_frag = include_str!( "../shaders/background.frag" );
   let background_vert = include_str!( "../shaders/background.vert" );
 
+  let _ = gl.get_extension( "NV_shader_noperspective_interpolation" ).unwrap();
+
   let background_program = gl::ProgramFromSources::new( background_vert, background_frag ).compile_and_link( &gl )?;
 
   // Camera setup
@@ -174,7 +176,7 @@ fn run() -> Result< (), gl::WebglError >
   let mut base_colors = Vec::with_capacity( num_bodies );
 
   let line_width = if settings.world_units { settings.world_width } else { settings.screen_width };
-
+  gl::info!("{:?}", [ width as f32, height as f32 ]);
   for _ in 0..num_bodies
   {
     let color = gl::F32x3::new( fastrand::f32(), fastrand::f32(), fastrand::f32() );

@@ -1,4 +1,5 @@
 #version 300 es
+#extension GL_NV_shader_noperspective_interpolation : require
 // Renders 3d line, supporting both screen space and world space units.
 // Allows for anti-aliasing with alpha-to-coverage enabled.
 // Has an optional color attribute for the points of the line.
@@ -28,17 +29,27 @@ uniform mat4 u_projection_matrix;
 uniform vec2 u_resolution;
 uniform float u_width;
 
-out vec2 vUv;
-out vec3 vViewPos;
-out vec3 vViewA;
-out vec3 vViewB;
+#ifdef USE_WORLD_UNITS
+  out vec3 vViewPos;
+  out vec2 vUv;
+#else
+  noperspective out vec3 vViewPos;
+  noperspective out vec2 vUv;
+#endif
+
+flat out vec3 vViewA;
+flat out vec3 vViewB;
 
 #ifdef USE_VERTEX_COLORS
   out vec3 vColor;
 #endif
 
 #ifdef USE_DASH
-  out float vLineDistance;
+  #ifdef USE_WORLD_UNITS
+    out float vLineDistance;
+  #else
+    noperspective out float vLineDistance;
+  #endif
   flat out float vLineDistanceA;
   flat out float vLineDistanceB;
 #endif
@@ -85,32 +96,31 @@ void main()
 
   vec4 clip = vec4( 0.0 );
 
+  vec3 viewPos = position.y < 0.5 ? viewA : viewB;
+  vec3 viewAB = normalize( viewB - viewA );
+  vec3 midForward = normalize( mix( viewA, viewB, 0.5 ) );
+  vec3 up = normalize( cross( viewAB, midForward ) );
+  vec3 right = normalize( cross( viewAB, up ) );
+
+  float halfWith = 0.5 * u_width;
+
+  // Protrude vertices to create an illusion of 3d shape in view space
+  viewPos += position.x < 0.0 ? up * halfWith : -up * halfWith;
+
+
+  viewPos += position.y < 0.5 ? -halfWith * viewAB : halfWith * viewAB;
+  viewPos += right * halfWith;
+  if( position.y < 0.0 || position.y > 1.0 )
+  {
+    viewPos += 2.0 * -right * halfWith;
+  }
+
+  vViewPos = viewPos;
+
   #ifdef USE_WORLD_UNITS
-    vec3 viewPos = position.y < 0.5 ? viewA : viewB;
-    vec3 viewAB = normalize( viewB - viewA );
-    vec3 midForward = normalize( mix( viewA, viewB, 0.5 ) );
-    vec3 up = normalize( cross( viewAB, midForward ) );
-    vec3 right = normalize( cross( viewAB, up ) );
-
-    float halfWith = 0.5 * u_width;
-
-    // Protrude vertices to create an illusion of 3d shape in view space
-    viewPos += position.x < 0.0 ? up * halfWith : -up * halfWith;
-
-    //#ifndef USE_DASH
-      viewPos += position.y < 0.5 ? -halfWith * viewAB : halfWith * viewAB;
-      viewPos += right * halfWith;
-      if( position.y < 0.0 || position.y > 1.0 )
-      {
-        viewPos += 2.0 * -right * halfWith;
-      }
-    //#endif
-    
     clip = u_projection_matrix * vec4( viewPos, 1.0 );
     vec3 ndcShift = position.y < 0.5 ? clipA.xyz / clipA.w : clipB.xyz / clipB.w;
     clip.z = ndcShift.z * clip.w;
-
-    vViewPos = viewPos;
   #else // Screen space units
     vec2 screenA = u_resolution * ( 0.5 * clipA.xy / clipA.w + 0.5 );
     vec2 screenB = u_resolution * ( 0.5 * clipB.xy / clipB.w + 0.5 );
@@ -134,7 +144,9 @@ void main()
 
 
     clip = ( position.y < 0.5 ) ? clipA : clipB;
-    
+    // clip.z /= clip.w;
+    // clip.xy = ( 2.0 * p / u_resolution - 1.0 );
+    // clip.w = 1.0;
     clip.xy = clip.w * ( 2.0 * p / u_resolution - 1.0 );
 
   #endif

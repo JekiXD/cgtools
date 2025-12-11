@@ -1,8 +1,10 @@
 #version 300 es
+#extension GL_NV_shader_noperspective_interpolation : require
 // Renders 3d line, supporting both screen space and world space units.
 // Allows for anti-aliasing with alpha-to-coverage enabled.
 // Has an optional color attribute for the points of the line.
 precision highp float;
+
 
 // #include <defines>
 
@@ -27,17 +29,27 @@ uniform float u_width;
   #endif
 #endif
 
-in vec2 vUv;
-in vec3 vViewPos;
-in vec3 vViewA;
-in vec3 vViewB;
+#ifdef USE_WORLD_UNITS
+  in vec3 vViewPos;
+  in vec2 vUv;
+#else
+  noperspective in vec3 vViewPos;
+  noperspective in vec2 vUv;
+#endif
+
+flat in vec3 vViewA;
+flat in vec3 vViewB;
 
 #ifdef USE_VERTEX_COLORS
   in vec3 vColor;
 #endif
 
 #ifdef USE_DASH
-  in float vLineDistance;
+  #ifdef USE_WORLD_UNITS
+    in float vLineDistance;
+  #else
+    noperspective in float vLineDistance;
+  #endif
   flat in float vLineDistanceA;
   flat in float vLineDistanceB;
 #endif
@@ -230,25 +242,47 @@ void main()
       #endif
     #endif
   #else // Screen space units
-    #ifdef USE_ALPHA_TO_COVERAGE
-      float a = vUv.x;
-      float b = ( vUv.y > 0.0 ) ? vUv.y - 1.0 : vUv.y + 1.0;
-      float len2 = a * a + b * b;
-      float dlen = fwidth( len2 );
+    #ifdef USE_DASH
+      vec3 rayEnd = normalize( vViewPos ) * 1e5;
+      
+      float norm1 = getDistanceToDash( rayEnd, -1.0 );
+      float norm2 = getDistanceToDash( rayEnd, 0.0 );
+      float norm3 = getDistanceToDash( rayEnd, 1.0 );
 
-      if ( abs( vUv.y ) > 1.0 ) 
-      {
-        alpha = 1.0 - smoothstep( 1.0 - dlen, 1.0 + dlen, len2 );
-      }
+      float norm = min( min( norm1, norm2 ), norm3 );
+      //float norm = norm2;
+      if( norm == MAX_FLOAT ) { discard; }
+
+      // if ( norm > 0.1 ) 
+      // {
+      //   discard;
+      // }
     #else
-      if( abs( vUv.y ) > 1.0 )
-      {
+      #ifdef USE_ALPHA_TO_COVERAGE
         float a = vUv.x;
         float b = ( vUv.y > 0.0 ) ? vUv.y - 1.0 : vUv.y + 1.0;
         float len2 = a * a + b * b;
+        float dlen = fwidth( len2 );
 
-        if ( len2 > 1.0 ) discard;
-      }
+        if ( abs( vUv.y ) > 1.0 ) 
+        {
+          alpha = 1.0 - smoothstep( 1.0 - dlen, 1.0 + dlen, len2 );
+        }
+      #else
+        // float a = vUv.x;
+        // float b = ( vUv.y > 0.0 ) ? vUv.y - 1.0 : vUv.y + 1.0;
+        // b = max( 0.0, b );
+        // float len2 = a * a + b * b;
+        // if ( len2 > 1.0 ) discard;
+        if( abs( vUv.y ) > 1.0 )
+        {
+          float a = vUv.x;
+          float b = ( vUv.y > 0.0 ) ? vUv.y - 1.0 : vUv.y + 1.0;
+          float len2 = a * a + b * b;
+
+          if ( len2 > 1.0 ) discard;
+        }
+      #endif
     #endif
   #endif
 
@@ -257,6 +291,8 @@ void main()
   #endif
 
   col = vec3( 0.0 );
+  col = vec3( fract(vUv), 0.0 );
+  col = vec3( norm );
 
   frag_color = vec4( col, alpha );
 }
