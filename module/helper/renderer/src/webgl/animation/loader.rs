@@ -1,26 +1,40 @@
 #[ allow( clippy::question_mark ) ]
 mod private
 {
+  use rustc_hash::FxHashMap;
   use std::
   {
     cell::RefCell,
-    collections::HashMap,
     rc::Rc
+  };
+  use crate::webgl::
+  {
+    Node,
+    animation::
+    {
+      base::
+      {
+        TRANSLATION_PREFIX,
+        ROTATION_PREFIX,
+        SCALE_PREFIX
+      },
+      Animation
+    }
   };
   use animation::
   {
-    easing::
-    {
-      cubic::CubicHermite,
-      EasingBuilder,
-      EasingFunction,
-      Linear,
-      Squad,
-      Step
-    },
     Sequence,
     Sequencer,
-    Tween
+    Tween,
+    easing::
+    {
+      EasingBuilder,
+      EasingFunction,
+      Squad,
+      Step,
+      Linear,
+      cubic::CubicHermite
+    }
   };
   use gltf::
   {
@@ -30,178 +44,7 @@ mod private
     },
     Gltf
   };
-  use minwebgl as gl;
-  use gl::{ F64x3, F32x3, QuatF32, QuatF64 };
-  use crate::webgl::Node;
-
-  /// Prefix used for getting [`Node`] translation
-  pub const TRANSLATION_PREFIX : &'static str = ".translation";
-  /// Prefix used for getting [`Node`] rotation
-  pub const ROTATION_PREFIX : &'static str = ".rotation";
-  /// Prefix used for getting [`Node`] scale
-  pub const SCALE_PREFIX : &'static str = ".scale";
-
-  /// 3D transformation data including translation, rotation, and scale components.
-  pub struct Transform
-  {
-    /// Translation
-    pub translation : F64x3,
-    /// Rotation
-    pub rotation : QuatF64,
-    /// Scale
-    pub scale : F64x3,
-  }
-
-  /// Use this struct for saving simple 3D transformations
-  /// for every [`Node`] of one object
-  pub struct Pose
-  {
-    /// Stores [`Transform`] for every [`Node`]
-    transforms : HashMap< Box< str >, Transform >,
-    /// Stores links to [`Node`]'s
-    nodes : HashMap< Box< str >, Rc< RefCell< Node > > >
-  }
-
-  impl Pose
-  {
-    /// [`Pose`] constructor
-    ///
-    /// Parameters:
-    /// * _nodes - list of [`Node`]'s which current 3D
-    ///   transformation parameters are used for defining [`Pose`]
-    #[ allow( clippy::used_underscore_binding ) ]
-    pub fn new( _nodes : &[ Rc< RefCell< Node > > ] ) -> Self
-    {
-      let transforms = _nodes.iter()
-      .filter_map
-      (
-        | n |
-        {
-          let Some( name ) = n.borrow().get_name()
-          else
-          {
-            return None;
-          };
-
-          let transform = Transform
-          {
-            translation : F64x3::from_array( n.borrow().get_translation().map( | v | v as f64 ) ),
-            rotation : QuatF64::from( n.borrow().get_rotation().0.map( | v | v as f64 ) ),
-            scale : F64x3::from_array( n.borrow().get_scale().map( | v | v as f64 ) )
-          };
-
-          Some( ( name, transform ) )
-        }
-      )
-      .collect::< HashMap< _, _ > >();
-
-      let nodes = _nodes.iter()
-      .filter_map
-      (
-        | n |
-        {
-          let Some( name ) = n.borrow().get_name()
-          else
-          {
-            return None;
-          };
-
-          Some( ( name, n.clone() ) )
-        }
-      )
-      .collect::< HashMap< _, _ > >();
-
-      Self
-      {
-        transforms,
-        nodes
-      }
-    }
-
-    /// Set [`Transform`]'s for each related [`Node`]
-    pub fn set( &self )
-    {
-      for ( name, t ) in &self.transforms
-      {
-        if let Some( node ) = self.nodes.get( name )
-        {
-          let mut node_mut = node.borrow_mut();
-
-          node_mut.set_translation( F32x3::from_array( t.translation.0.map( | v | v as f32 ) ) );
-          node_mut.set_rotation( QuatF32::from( t.rotation.0.map( | v | v as f32 ) ) );
-          node_mut.set_scale( F32x3::from_array( t.scale.0.map( | v | v as f32 ) ) );
-        }
-      }
-    }
-  }
-
-  /// Contains data for animating [`Mesh`]
-  #[ derive( Clone ) ]
-  pub struct Animation
-  {
-    /// Animation name
-    pub name : Option< Box< str > >,
-    /// Animation behavior
-    pub sequencer : Rc< RefCell< Sequencer > >,
-    /// Related animated [`Node`]'s
-    pub nodes : HashMap< Box< str >, Rc< RefCell< Node > > >
-  }
-
-  impl Animation
-  {
-    /// Updates all [`AnimatableValue`]'s for current [`Animation`]
-    pub fn update( &self, delta_time : f64 )
-    {
-      self.sequencer.borrow_mut().update( delta_time );
-    }
-
-    /// Sets all simple 3D transformations for every
-    /// [`Node`] related to this [`Animation`]
-    pub fn set( &self )
-    {
-      for ( name, node ) in &self.nodes
-      {
-        if let Some( translation ) = self.sequencer.borrow()
-        .get_value::< Sequence< Tween< F64x3 > > >
-        (
-          &format!( "{}{}", name, TRANSLATION_PREFIX )
-        )
-        {
-          if let Some( translation ) = translation.get_current()
-          {
-            let translation = translation.get_current_value().0.map( | v | v as f32 );
-            node.borrow_mut().set_translation( F32x3::from_array( translation ) );
-          }
-        }
-
-        if let Some( rotation ) = self.sequencer.borrow()
-        .get_value::< Sequence< Tween< QuatF64 > > >
-        (
-          &format!( "{}{}", name, ROTATION_PREFIX )
-        )
-        {
-          if let Some( rotation ) = rotation.get_current()
-          {
-            let rotation = rotation.get_current_value().0.map( | v | v as f32 );
-            node.borrow_mut().set_rotation( QuatF32::from( rotation ) );
-          }
-        }
-
-        if let Some( scale ) = self.sequencer.borrow()
-        .get_value::< Sequence< Tween< F64x3 > > >
-        (
-          &format!( "{}{}", name, SCALE_PREFIX )
-        )
-        {
-          if let Some( scale ) = scale.get_current()
-          {
-            let scale = scale.get_current_value().0.map( | v | v as f32 );
-            node.borrow_mut().set_scale( F32x3::from_array( scale ) );
-          }
-        }
-      }
-    }
-  }
+  use mingl::{ F64x3, QuatF64 };
 
   fn decode_channel< 'a >
   (
@@ -420,7 +263,7 @@ mod private
     let mut animations = Vec::new();
     for animation in gltf_file.animations()
     {
-      let mut animated_nodes = HashMap::new();
+      let mut animated_nodes = FxHashMap::default();
       let mut sequencer = Sequencer::new();
 
       for channel in animation.channels()
@@ -468,12 +311,12 @@ mod private
         };
       }
 
-      let animation = Animation
-      {
-        name : animation.name().map( | s | s.to_string().into_boxed_str() ),
-        sequencer : Rc::new( RefCell::new( sequencer ) ),
-        nodes : animated_nodes
-      };
+      let animation = Animation::new
+      (
+        animation.name().map( | s | s.into() ),
+        Box::new( sequencer ),
+        animated_nodes
+      );
 
       animations.push( animation );
     }
@@ -484,18 +327,8 @@ mod private
 
 crate::mod_interface!
 {
-  orphan use
-  {
-    Animation,
-    Pose,
-    Transform
-  };
-
   own use
   {
-    load,
-    TRANSLATION_PREFIX,
-    ROTATION_PREFIX,
-    SCALE_PREFIX
+    load
   };
 }
