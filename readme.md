@@ -2,7 +2,7 @@
 
 Computer graphics toolkit for WebAssembly applications.
 
-![Abstract Art](./assets/primitives.jpg)
+![Abstract Art](./media/primitives.jpg)
 
 ## Overview
 
