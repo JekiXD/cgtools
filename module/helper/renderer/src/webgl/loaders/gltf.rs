@@ -38,7 +38,7 @@ mod private
   };
   use web_sys::wasm_bindgen::prelude::Closure;
 
-  use rustc_hash::FxHashMap;
+  use rustc_hash::{ FxHashSet, FxHashMap };
   use
   {
     crate::webgl::Skeleton,
@@ -87,6 +87,9 @@ mod private
     /// Deletes every WebGL object this glTF allocated: buffer-view buffers, image
     /// textures, and the VAO of every primitive's geometry.
     ///
+    /// Each VAO is deleted exactly once, even when several primitives share one
+    /// `Rc< RefCell< Geometry > >`.
+    ///
     /// Must be called explicitly. Dropping a `GLTF` frees **no** GPU memory: `WebGlBuffer`,
     /// `WebGlTexture` and `WebGlVertexArrayObject` are `JsValue` handles, so dropping one
     /// releases a JS reference while the GL object itself lives until `gl.delete_*` is
@@ -116,12 +119,26 @@ mod private
         gl.delete_texture( Some( texture ) );
       }
 
+      // Two primitives may share one `Rc< RefCell< Geometry > >`, and therefore one VAO —
+      // a consumer that re-materials a primitive typically clones the `Rc` to keep the
+      // geometry. Deleting a VAO twice is harmless (WebGL ignores a delete of an
+      // already-deleted object), but de-duplicating keeps the number of `delete_vertex_array`
+      // calls equal to the number of VAOs this glTF actually owns, which is what lets a test
+      // assert the count rather than merely assert "no panic".
+      //
+      // Identity is the `Rc`'s address, not the VAO handle: `WebGlVertexArrayObject` is a
+      // `JsValue` and is neither `Hash` nor `Eq` on the GL object it names.
+      let mut seen_geometries : FxHashSet< *const RefCell< Geometry > > = FxHashSet::default();
       for mesh in &self.meshes
       {
         let mesh = mesh.borrow();
         for primitive in &mesh.primitives
         {
           let primitive = primitive.borrow();
+          if !seen_geometries.insert( Rc::as_ptr( &primitive.geometry ) )
+          {
+            continue;
+          }
           let geometry = primitive.geometry.borrow();
           gl.delete_vertex_array( Some( &geometry.vao ) );
         }
