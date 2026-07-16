@@ -90,23 +90,53 @@ mod private
     /// Each VAO is deleted exactly once, even when several primitives share one
     /// `Rc< RefCell< Geometry > >`.
     ///
-    /// Must be called explicitly. Dropping a `GLTF` frees **no** GPU memory: `WebGlBuffer`,
-    /// `WebGlTexture` and `WebGlVertexArrayObject` are `JsValue` handles, so dropping one
-    /// releases a JS reference while the GL object itself lives until `gl.delete_*` is
-    /// called. No scene-graph type implements `Drop`, and none can — `Drop` has no `gl` in
-    /// scope, and `Geometry` is `Clone`, so two values may legitimately name one VAO.
+    /// # Why it is explicit
     ///
-    /// Only objects created by *this* `GLTF`'s own [`load`] are deleted. `gl_buffers` and
-    /// `images` are the ownership lists; deletion is driven solely from them and from the
-    /// meshes' own geometry. Objects that a scene merely *references* — a shared
-    /// environment map, or a node tree cloned from another `GLTF` whose `Geometry::clone`
-    /// copied the handle rather than the object — are not reachable from here, and so
-    /// cannot be freed by mistake. This is why the free is driven from `GLTF` and not by
-    /// walking a `Scene`.
+    /// Dropping a `GLTF` frees **no** GPU memory: `WebGlBuffer`, `WebGlTexture` and
+    /// `WebGlVertexArrayObject` are `JsValue` handles, so dropping one releases a JS
+    /// reference while the GL object itself lives until `gl.delete_*` is called. No
+    /// scene-graph type implements `Drop`, and none can — `Drop` has no `gl` in scope, and
+    /// `Geometry` is `Clone`, so two values may legitimately name one VAO.
     ///
-    /// After this call every handle in `self` is dangling. The `GLTF` must not be rendered
-    /// or reused. Calling twice is harmless — WebGL ignores a delete of an already-deleted
-    /// object — but pointless.
+    /// # What it frees — and what it does not
+    ///
+    /// Only objects created by *this* `GLTF`'s own [`load`]: `gl_buffers` and `images` are
+    /// the ownership lists, and deletion is driven solely from them and from the meshes' own
+    /// geometry.
+    ///
+    /// It therefore frees **nothing a consumer allocated afterwards**. Anything built on top
+    /// of a loaded model — a generated cube map, a baked shadow texture, a replacement
+    /// material — is invisible here and remains the caller's responsibility. Such resources
+    /// commonly dwarf the model's own: a caller that frees only via this method may still
+    /// leak the great majority of what a model cost it.
+    ///
+    /// The same boundary is what makes it safe: objects a scene merely *references* — a
+    /// shared environment map, or a node tree cloned from another `GLTF` whose
+    /// `Geometry::clone` copied the handle rather than the object — are not reachable from
+    /// here and so cannot be freed by mistake. This is why the free is driven from `GLTF`
+    /// and never by walking a `Scene`.
+    ///
+    /// # Do not call while the model is still being rendered
+    ///
+    /// Freeing does not unbind the model from anything that still holds it. If a renderer
+    /// retains the scene, the next frame draws from deleted objects: expect missing geometry
+    /// and black textures. WebGL is memory-safe, so this corrupts output rather than the
+    /// process — which makes it a quiet bug, not a loud one. Detach the model first, then
+    /// free.
+    ///
+    /// # Calling twice
+    ///
+    /// Harmless. WebGL ignores a delete of an already-deleted object, and a handle is an
+    /// opaque JS object that is never recycled — unlike an OpenGL integer name, it cannot
+    /// come to alias a *different* object later, so a stale handle stays inert rather than
+    /// becoming dangerous. It is still pointless: after the first call every handle in
+    /// `self` is dead, and the `GLTF` must not be rendered or reused.
+    ///
+    /// # Panics
+    ///
+    /// If `images`, any mesh, primitive or geometry is already **mutably** borrowed — for
+    /// example when called from inside a `Scene::traverse` callback, which holds borrows
+    /// while it runs. Free from outside any traversal.
     pub fn free_gl_resources( &self, gl : &gl::WebGl2RenderingContext )
     {
       for buffer in &self.gl_buffers
