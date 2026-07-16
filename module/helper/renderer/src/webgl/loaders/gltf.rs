@@ -83,6 +83,50 @@ mod private
       let material = self.materials[ id ].borrow();
       helpers::cast_unchecked_material_to_ref( material )
     }
+
+    /// Deletes every WebGL object this glTF allocated: buffer-view buffers, image
+    /// textures, and the VAO of every primitive's geometry.
+    ///
+    /// Must be called explicitly. Dropping a `GLTF` frees **no** GPU memory: `WebGlBuffer`,
+    /// `WebGlTexture` and `WebGlVertexArrayObject` are `JsValue` handles, so dropping one
+    /// releases a JS reference while the GL object itself lives until `gl.delete_*` is
+    /// called. No scene-graph type implements `Drop`, and none can — `Drop` has no `gl` in
+    /// scope, and `Geometry` is `Clone`, so two values may legitimately name one VAO.
+    ///
+    /// Only objects created by *this* `GLTF`'s own [`load`] are deleted. `gl_buffers` and
+    /// `images` are the ownership lists; deletion is driven solely from them and from the
+    /// meshes' own geometry. Objects that a scene merely *references* — a shared
+    /// environment map, or a node tree cloned from another `GLTF` whose `Geometry::clone`
+    /// copied the handle rather than the object — are not reachable from here, and so
+    /// cannot be freed by mistake. This is why the free is driven from `GLTF` and not by
+    /// walking a `Scene`.
+    ///
+    /// After this call every handle in `self` is dangling. The `GLTF` must not be rendered
+    /// or reused. Calling twice is harmless — WebGL ignores a delete of an already-deleted
+    /// object — but pointless.
+    pub fn free_gl_resources( &self, gl : &gl::WebGl2RenderingContext )
+    {
+      for buffer in &self.gl_buffers
+      {
+        gl.delete_buffer( Some( buffer ) );
+      }
+
+      for texture in self.images.borrow().iter()
+      {
+        gl.delete_texture( Some( texture ) );
+      }
+
+      for mesh in &self.meshes
+      {
+        let mesh = mesh.borrow();
+        for primitive in &mesh.primitives
+        {
+          let primitive = primitive.borrow();
+          let geometry = primitive.geometry.borrow();
+          gl.delete_vertex_array( Some( &geometry.vao ) );
+        }
+      }
+    }
   }
 
   fn load_skeleton_transforms_data
