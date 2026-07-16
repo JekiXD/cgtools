@@ -114,6 +114,16 @@ mod private
         gl.delete_buffer( Some( buffer ) );
       }
 
+      // `images` is the ownership list for textures: `load`'s only `gl.create_texture` call
+      // pushes into it unconditionally, so it is both complete and exclusive.
+      //
+      // Deliberately NOT driven from `self.textures` or `self.materials`, and neither should be
+      // added here:
+      //   * a `Texture.source` is a *clone* of an `images` entry, and several glTF textures may
+      //     name one image — iterating them deletes the same GL object repeatedly;
+      //   * a material may hold a texture this `GLTF` does not own. A consumer can assign a
+      //     shared environment map into a material; deleting it here would blank that texture
+      //     for every other model still using it.
       for texture in self.images.borrow().iter()
       {
         gl.delete_texture( Some( texture ) );
