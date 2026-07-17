@@ -85,10 +85,11 @@ mod private
     }
 
     /// Deletes every WebGL object this glTF allocated: buffer-view buffers, image
-    /// textures, and the VAO of every primitive's geometry.
+    /// textures, the VAO of every primitive's geometry, and — for a skinned or
+    /// morph-target model — each mesh's skeleton textures.
     ///
-    /// Each VAO is deleted exactly once, even when several primitives share one
-    /// `Rc< RefCell< Geometry > >`.
+    /// Each VAO and each skeleton is freed exactly once, even when several primitives share
+    /// one `Rc< RefCell< Geometry > >` or several meshes share one skin.
     ///
     /// # Why it is explicit
     ///
@@ -169,9 +170,23 @@ mod private
       // Identity is the `Rc`'s address, not the VAO handle: `WebGlVertexArrayObject` is a
       // `JsValue` and is neither `Hash` nor `Eq` on the GL object it names.
       let mut seen_geometries : FxHashSet< *const RefCell< Geometry > > = FxHashSet::default();
+      // A skin may be shared by several meshes, so skeletons are de-duplicated for the same
+      // reason geometries are.
+      let mut seen_skeletons : FxHashSet< *const RefCell< Skeleton > > = FxHashSet::default();
       for mesh in &self.meshes
       {
         let mesh = mesh.borrow();
+
+        // Skinning and morph-target textures. Only a skinned or morphed model has any, so
+        // this is a no-op for the static case.
+        if let Some( skeleton ) = &mesh.skeleton
+        {
+          if seen_skeletons.insert( Rc::as_ptr( skeleton ) )
+          {
+            skeleton.borrow().free_gl_resources( gl );
+          }
+        }
+
         for primitive in &mesh.primitives
         {
           let primitive = primitive.borrow();

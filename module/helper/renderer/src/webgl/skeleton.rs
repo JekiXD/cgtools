@@ -635,6 +635,40 @@ mod private
       }
     }
 
+    /// Deletes the GL textures this skeleton owns: the joint global/inverse transform
+    /// textures, and the morph-target displacements texture.
+    ///
+    /// Must be called explicitly — a `WebGlTexture` is a `JsValue` handle, so dropping a
+    /// `Skeleton` releases a JS reference while the GL texture itself lives on. There is no
+    /// `Drop` impl for the same reasons it is absent from the rest of the scene graph: `Drop`
+    /// has no `gl` in scope, and these types are `Clone`.
+    ///
+    /// Normally reached through `GLTF::free_gl_resources`, which frees the skeleton of every
+    /// mesh it owns; call it directly only for a skeleton built outside a glTF load.
+    ///
+    /// A skeleton with no skin and no morph targets owns nothing, and freeing it is a no-op.
+    ///
+    /// # Cloning
+    ///
+    /// Cloning a [`Skeleton`] copies the texture *handles*, so a fresh clone briefly names the
+    /// same GL textures as its origin. That is safe to free: the clone carries
+    /// `need_clone_inner`, and its first `upload` replaces every shared handle with a newly
+    /// created texture before it is ever sampled. A clone therefore never renders from a
+    /// texture this method deleted.
+    pub fn free_gl_resources( &self, gl : &GL )
+    {
+      if let Some( transforms ) = &self.transforms
+      {
+        gl.delete_texture( transforms.global_texture.as_ref() );
+        gl.delete_texture( transforms.inverse_texture.as_ref() );
+      }
+
+      if let Some( displacements ) = &self.displacements
+      {
+        gl.delete_texture( displacements.displacements_texture.as_ref() );
+      }
+    }
+
     /// Upload joints transform and morph targets displacements data
     pub fn upload
     (
